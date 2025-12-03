@@ -26,13 +26,13 @@ const uint8_t LIMIT_LEFT = 36, LIMIT_RIGHT = 37;
 
 // Thermistor module
 const uint8_t THERMISTOR = 45;
-const uint8_t FAN_PIN = 5;
+const uint8_t FAN_PIN = 12;
 
 // WiFi module pins
 const uint8_t wifiModuleTX = A8, wifiModuleRX = A9, ARUCO_MARKER_ID = 67;
 
 // ============================================================================
-// CONSTANTS
+// CONSTANTS0oi
 // ============================================================================
 
 // Motor identifiers
@@ -40,12 +40,12 @@ enum MotorID { FR = 1, FL = 2, BR = 3, BL = 4 };
 enum MotorDirection { FORWARD = 1, BACKWARD = 2, OFF = 3 };
 
 // Obstacle avoidance thresholds (cm)
-const float FRONT_THRESH = 20.0f;
+const float FRONT_THRESH = 25.0f;
 const float SIDE_THRESH = 15.0f;
 
 // Control parameters
 const double HOLD_TIME = 1000.0;  // ms
-const unsigned long POSE_TIMEOUT = 150;  // ms
+const unsigned long POSE_TIMEOUT = 250;  // ms
 
 // PID gains
 const double LONG_K_P = 0.8;
@@ -53,8 +53,8 @@ const double STRAFE_K_P = 0.8;
 const double TURN_K_P = 1.2;
 
 // Position/angle thresholds
-const double POS_THRESHOLD = 0.04;  // 4 cm
-const double ANGLE_THRESHOLD = 0.06;  // radians (~3.5 degrees)
+const double POS_THRESHOLD = 0.08;  // 4 cm
+const double ANGLE_THRESHOLD = 0.09;  // radians (~3.5 degrees)
 
 // Speed limits
 const double MAX_LINEAR_SPEED = 0.5;
@@ -62,7 +62,7 @@ const double MAX_ROTATION_SPEED = 0.5;
 
 // Obstacle pause behavior
 const unsigned long OBSTACLE_PAUSE_MS = 250;
-const uint8_t OBSTACLE_SAMPLES = 5;
+const uint8_t OBSTACLE_SAMPLES = 8;
 const unsigned long OBSTACLE_SAMPLE_DELAY_MS = 0;
 
 // ============================================================================
@@ -166,9 +166,12 @@ Pose getArucoMarkerPose() {
         pose = {Enes100.getX(), Enes100.getY(), Enes100.getTheta(), millis()};
         lastPose = pose;
         poseValid = true;
+        printeln("DEBUG: ArUco visible, pose=(" + String(pose.x, 3) + ", " + String(pose.y, 3) + ", " + String(pose.theta, 4) + ")");
     } else {
         pose = lastPose;
-        poseValid = (millis() - lastPose.timestamp < POSE_TIMEOUT);
+        unsigned long age = millis() - lastPose.timestamp;
+        poseValid = (age < POSE_TIMEOUT);
+        printeln("DEBUG: ArUco not visible, using last pose age=" + String(age) + "ms, valid=" + String(poseValid));
     }
     return pose;
 }
@@ -349,19 +352,28 @@ void updateDrive(unsigned long now) {
 
 bool turnToAngle(double thetaTarget, double power) {
     Pose p = getArucoMarkerPose();
-    double error = normalizeAngle(thetaTarget - p.theta);
+    double error = (thetaTarget - p.theta);
+
+    printeln("DEBUG: poseValid=" + String(poseValid) + ", error=" + String(error, 4) + ", target=" + String(thetaTarget, 4) + ", current=" + String(p.theta, 4));
 
     if (fabs(error) < ANGLE_THRESHOLD) {
         turnOffMotors();
         return true;
     }
 
-    double vr = power; 
+    double vr = power;
+    // if (error > 0) {
+    //     vr = power;
+    // }else {
+    //     vr = -1.0 * power;
+    // }
     vr = constrain(vr, -MAX_ROTATION_SPEED, MAX_ROTATION_SPEED);
 
     if (poseValid) {
+        printeln("DEBUG: Driving with vr=" + String(vr, 4));
         mecanumDrive(0, 0, vr);
     } else {
+        printeln("DEBUG: Pose invalid, turning off motors");
         turnOffMotors();
     }
     return false;
@@ -462,7 +474,7 @@ bool moveStrafeToY(double targetY, double power) {
     }
 
     // Determine if the target is in front or behind the robot
-    double forwardComponent = errorY * cos(p.theta);
+    double forwardComponent = errorY * -1.0 * cos(p.theta);
 
     // Auto-select forward/backward direction
     double drivePower = (forwardComponent >= 0) ? power : -power;
@@ -642,7 +654,7 @@ bool goPath(const PathSegment* segments, size_t segmentCount) {
 // MAIN FUNCTIONS
 // ============================================================================
 
-enum PathState { START1, MOVE, TOP1, TOP2, TOP3, TOP4, TOP5, TOP6, 
+enum PathState { START1, MOVE, TOPL, TOP2, TOP3, TOP4, TOP5, TOP6, 
     CHECK_OBSTACLE_TOP1,
     CHECK_OBSTACLE_TOP2F, 
     CHECK_OBSTACLE_TOP2, 
@@ -690,8 +702,11 @@ void setup() {
     printeln("GO");
 }
 
-void loop() {
-    unsigned long now = millis();
+// void loop() {
+    // unsigned long now = millis();
+
+    // Pose p = getArucoMarkerPose();   // force update at start of loop
+    // mecanumDrive(0.25, 0, 0);
 
     // printe("FIRE SUPPRESION LOCATION: ");
     // if (Enes100.isVisible()) {
@@ -705,65 +720,18 @@ void loop() {
     // printe("Left distance: ");
     // printeln(String(getLeftDistance(), 3));
 
-  // // digitalWrite(FAN_PIN, HIGH);
-  // // printeln("ON ");
-  // // delay(2000);
-  // // digitalWrite(FAN_PIN, LOW);
-  // // printeln("OFF ");
-  // // delay(2000);
+  // digitalWrite(FAN_PIN, HIGH);
+  // printeln("ON ");
+  // delay(2000);
+  // digitalWrite(FAN_PIN, LOW);
+  // printeln("OFF ");
+  // delay(2000);
 
   // updateDrive(now);        // motor control
 //   updateAllUltrasonics(now); // read US sensors
   // updateLimitSwitch();    // read limit switches
   // printeln("Flame sensor on: " + String(updateFlameSensor(now))); // read thermistor + control fan
-}
-
-void testPIDtoPoint() {
-    unsigned long now = millis();
-    // State machine
-    switch (pidState) {
-        case START_PID:
-            if (!printed) {
-                printeln("Scanning for ArUco marker");
-                printed = true;
-            }
-            if (Enes100.isVisible()) {
-                printeln("ArUco Marker Detected");
-                pidState = MOVE2_PID;
-                printeln("Going to point");
-            }
-            break;
-
-        case MOVE1_PID:
-            if (currentStep < numSteps) {
-                if (currentTimedDrive.done) {
-                    printeln("Step " + String(currentStep) + " Done");
-                    currentStep++;
-                    if (currentStep < numSteps) {
-                        printeln("Starting Step " + String(currentStep));
-                        startTimedDrive(path[currentStep]);
-                    }
-                }
-                updateDrive(now);
-            } else {
-                turnOffMotors();
-                printeln("Finished all steps in MOVE1");
-                pidState = MOVE2_PID;
-            }
-            break;
-
-        case MOVE2_PID:
-            if (goToPose(2.5, 0.5, 0)) {
-                printeln("Reached target (2.5,0.5,0)");
-                pidState = SCAN_PID;
-            }
-            break;
-
-        case SCAN_PID:
-            // Add scanning logic here
-            break;
-    }
-}
+// }
 
 void testMissionSensing() {
     unsigned long now = millis();
@@ -794,20 +762,18 @@ void testObstacleSensing() {
 }
 
 void testFan() {
-
     printeln("FAN ON");
     digitalWrite(FAN_PIN, HIGH);
-    // // delay(5000);
-    // printeln("FAN OFF");
-    // digitalWrite(FAN_PIN, LOW);
-    delay(2000);
+    delay(3000);
+    printeln("FAN OFF");
+    digitalWrite(FAN_PIN, LOW);
+    delay(3000);
 }
 
-void testRoute() {
+void loop() {
     unsigned long now = millis();
 
-    switch(testPath) {
-        case START1:
+    if (testPath == START1) {
         if (!printed) {
                 printeln("Scanning for ArUco marker");
                 printed = true;
@@ -815,47 +781,52 @@ void testRoute() {
             if (Enes100.isVisible()) {
                 printeln("ArUco Marker Detected");
                 testPath = MOVE;
-                printeln("Going to point");
             }
-        break;
-        case MOVE:
+    } else if (testPath == MOVE) {
         Pose pose = getArucoMarkerPose();
-        // top position
-        if (normalizeAngle(pose.theta) > 0) {
-            testPath = TOP1;
+        if (pose.theta > 0) {
+            printeln("Detected OTV at TOP");
+            printeln("turning to face mission site");
+            testPath = TOPL;
+        }else {
+            printeln("Detected OTV at BOTTOM");
+            testPath = BOTTOM1;
         }
-        break;
-        case TOP1:
+    } else if (testPath == TOPL) {
         // going to mission site
-        if (turnToAngle(-PI/2, 0.3)) {
+        bool a = turnToAngle(-1.5708, 0.22); // TUNE
+        if (a) {
+            printeln("moving to mission site");
             testPath = TOP2;
         }
-        break;
-        case TOP2:
+    } else if (testPath == TOP2) {
         // going to obstacle zone
-        if (moveLongToY(0.6, 0.3)) {
-            testPath = TOP3; // do the mission stuff after this step
-        }
-        break;
-
+            if (moveLongToY(0.75, 0.25)) {
+                printeln("moving backwards");
+                testPath = TOP3; // do the mission stuff after this step
+            }
+    }else {
+        // printeln("DEBUG: No case matched for testPath = " + String(testPath));
+    }
+    switch(testPath) {
         case TOP3:
-        // moving backwards
-        if (moveLongToY(1.5, 0.3)) {
-            testPath = TOP4;
-        }
+            // moving backwards
+            if (moveLongToY(1.5, 0.25)) {
+                testPath = TOP4;
+            }
         break;
 
         case TOP4:
-        if (turnToAngle(0, 0.3)) {
-            testPath = TOP5;
-        }
+            if (turnToAngle(0, 0.25)) {
+                testPath = TOP5;
+            }
         break;
 
         case TOP5:
-        if (moveLongToX(1.2, 0.3)) {
-            obstaclePauseActive = false;
-            testPath = CHECK_OBSTACLE_TOP1;
-        }
+            if (moveLongToX(0.65, 0.25)) {
+                obstaclePauseActive = false;
+                testPath = CHECK_OBSTACLE_TOP1;
+            }
         break;
 
         case CHECK_OBSTACLE_TOP1:
@@ -871,7 +842,7 @@ void testRoute() {
                     testPath = FORWARD_SECOND_ROW;
                 } else if (avgFront < FRONT_THRESH) {
                     printeln("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
-                    testPath = CHECK_OBSTACLE_TOP2;
+                    testPath = CHECK_OBSTACLE_TOP2F;
                 } else {
                     printeln("No obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = FORWARD_SECOND_ROW;
@@ -879,18 +850,54 @@ void testRoute() {
             }
         break;
 
-        case FORWARD_SECOND_ROW:
-        // go past the first row of obstacles
-        if (moveLongToX(2.0, 0.3)) {
-            testPath = MOVE_TO_SECOND_ROW_TOP;
-        }
+        case CHECK_OBSTACLE_TOP2F:
+            if (moveStrafeToY(1.0, 0.35)) {
+                obstaclePauseActive = false;
+                testPath = CHECK_OBSTACLE_TOP2;
+            }
         break;
+
+        case CHECK_OBSTACLE_TOP2:
+            if (!obstaclePauseActive) {
+                obstaclePauseActive = true;
+                obstaclePauseStart = now;
+                printeln("Pausing to check for obstacles...");
+            } else if (now - obstaclePauseStart >= OBSTACLE_PAUSE_MS) {
+                float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLES, OBSTACLE_SAMPLE_DELAY_MS);
+                obstaclePauseActive = false;
+                if (avgFront < 0) {
+                    printeln("Front sensor readings invalid; assuming clear path");
+                    testPath = FORWARD_SECOND_ROW;
+                } else if (avgFront < FRONT_THRESH) {
+                    printeln("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
+                    testPath = CHECK_OBSTACLE_TOP3F;
+                } else {
+                    printeln("No obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
+                    testPath = FORWARD_SECOND_ROW;
+                }
+            }
+        break;
+
+        case CHECK_OBSTACLE_TOP3F:
+            if (moveStrafeToY(0.5, 0.35)) {
+                obstaclePauseActive = false;
+                testPath = FORWARD_SECOND_ROW;
+            }
+        break;
+
+        case FORWARD_SECOND_ROW:
+            // go past the first row of obstacles
+            if (moveLongToX(1.65, 0.25)) {
+                testPath = MOVE_TO_SECOND_ROW_TOP;
+            }
+        break;
+
         case MOVE_TO_SECOND_ROW_TOP:
-        // go to the top of the second row
-        if (moveStrafeToY(1.5, 0.3)) {
-            obstaclePauseActive = false;
-            testPath = SECOND_ROW_TOP;
-        }
+            // go to the top of the second row
+            if (moveStrafeToY(1.5, 0.35)) {
+                obstaclePauseActive = false;
+                testPath = SECOND_ROW_TOP;
+            }
         break;
 
         case SECOND_ROW_TOP:
@@ -916,11 +923,11 @@ void testRoute() {
         break;
 
         case SECOND_ROW_MIDDLEF:
-        // strafing to the second row to detect the middle obstacle
-        if (moveStrafeToY(1.0, 0.3)) {
-            obstaclePauseActive = false;
-            testPath = SECOND_ROW_MIDDLE;
-        }
+            // strafing to the second row to detect the middle obstacle
+            if (moveStrafeToY(1.0, 0.35)) {
+                obstaclePauseActive = false;
+                testPath = SECOND_ROW_MIDDLE;
+            }
         break;
 
         case SECOND_ROW_MIDDLE:
@@ -946,37 +953,40 @@ void testRoute() {
         break;
 
         case SECOND_ROW_BOTTOMF:
-        // strafing to the third row
-        if (moveStrafeToY(0.5, 0.3)) {
-            obstaclePauseActive = false;
-            testPath = FORWARD_THIRD_ROW;
-        }
+            // strafing to the third row
+            if (moveStrafeToY(0.5, 0.35)) {
+                obstaclePauseActive = false;
+                testPath = FORWARD_THIRD_ROW;
+            }
         break;
 
         case FORWARD_THIRD_ROW:
-        // going forward past the second row of obstacles
-        if (moveLongToX(2.8, 0.3)) {
-            testPath = GO_TO_LIMBO;
-        }
+            // going forward past the second row of obstacles
+            if (moveLongToX(2.6, 0.25)) {
+                testPath = GO_TO_LIMBO;
+            }
         break;
 
         case GO_TO_LIMBO:
-        // strafing to the limbo area
-        if (moveStrafeToY(1.6, 0.3)) {
-            testPath = GO_UNDER_LIMBO;
-        }
+            // strafing to the limbo area
+            if (moveStrafeToY(1.6, 0.35)) {
+                testPath = GO_UNDER_LIMBO;
+            }
         break;
 
         case GO_UNDER_LIMBO:
-        // going underneath limbo
-        if (moveLongToX(3.7, 0.3)) {
-            printeln("DONE!");
-        }
+            // going underneath limbo
+            if (moveLongToX(3.75, 0.25)) {
+                printeln("DONE!");
+            }
         break;
 
         case BOTTOM1:
         break;
         case BOTTOM2:
+        break;
+        default:
+            // printeln("DEBUG: Unknown testPath value: " + String(testPath));
         break;
     }
 }
