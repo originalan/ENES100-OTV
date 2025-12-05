@@ -61,7 +61,7 @@ const double MAX_LINEAR_SPEED = 0.5;
 const double MAX_ROTATION_SPEED = 0.5;
 
 // Obstacle pause behavior
-const unsigned long OBSTACLE_PAUSE_MS = 250;
+const unsigned long OBSTACLE_PAUSE_MS = 1000;
 const uint8_t OBSTACLE_SAMPLES = 8;
 const unsigned long OBSTACLE_SAMPLE_DELAY_MS = 0;
 
@@ -166,12 +166,12 @@ Pose getArucoMarkerPose() {
         pose = {Enes100.getX(), Enes100.getY(), Enes100.getTheta(), millis()};
         lastPose = pose;
         poseValid = true;
-        printeln("DEBUG: ArUco visible, pose=(" + String(pose.x, 3) + ", " + String(pose.y, 3) + ", " + String(pose.theta, 4) + ")");
+        // printeln("DEBUG: ArUco visible, pose=(" + String(pose.x, 3) + ", " + String(pose.y, 3) + ", " + String(pose.theta, 4) + ")");
     } else {
         pose = lastPose;
         unsigned long age = millis() - lastPose.timestamp;
         poseValid = (age < POSE_TIMEOUT);
-        printeln("DEBUG: ArUco not visible, using last pose age=" + String(age) + "ms, valid=" + String(poseValid));
+        // printeln("DEBUG: ArUco not visible, using last pose age=" + String(age) + "ms, valid=" + String(poseValid));
     }
     return pose;
 }
@@ -350,18 +350,54 @@ void updateDrive(unsigned long now) {
 // NAVIGATION FUNCTIONS (FIXED BUGS)
 // ============================================================================
 
-bool turnToAngle(double thetaTarget, double power) {
+// direction = true = CW, false = CCW
+bool turnToAngleSmall(double thetaTarget, double power, bool direction) {
+    Pose p = {Enes100.getX(), Enes100.getY(), Enes100.getTheta(), millis()};
+    double error = fabs(thetaTarget - p.theta);
+    if (direction == true) {
+            // mecanumDrive(0, 0, -1.0 * power);
+        mecanumDrive(0, 0, power);
+        delay(150);
+        turnOffMotors();
+        delay(1000);
+
+        if (error < 0.05) {
+            return true;
+        }else {
+            return false;
+        }
+    }else {
+        mecanumDrive(0, 0, -1.0 * power);
+        delay(200);
+        turnOffMotors();
+        delay(1000);
+
+        if (error < 0.05) {
+            return true;
+        }else {
+            return false;
+        }
+    }
+}
+
+// direction = true = CWW, false = CW
+bool turnToAngle(double thetaTarget, double power, bool direction) {
     Pose p = getArucoMarkerPose();
     double error = (thetaTarget - p.theta);
 
-    printeln("DEBUG: poseValid=" + String(poseValid) + ", error=" + String(error, 4) + ", target=" + String(thetaTarget, 4) + ", current=" + String(p.theta, 4));
+    // printeln("D:poseValid=" + String(poseValid) + ", error=" + String(error, 4) + ", target=" + String(thetaTarget, 4) + ", current=" + String(p.theta, 4));
 
     if (fabs(error) < ANGLE_THRESHOLD) {
+        // mecanumDrive(0, 0, power);
+        // delay(450);
         turnOffMotors();
         return true;
     }
 
     double vr = power;
+    if (direction == false) {
+        vr = vr * -1.0;
+    }
     // if (error > 0) {
     //     vr = power;
     // }else {
@@ -370,10 +406,8 @@ bool turnToAngle(double thetaTarget, double power) {
     vr = constrain(vr, -MAX_ROTATION_SPEED, MAX_ROTATION_SPEED);
 
     if (poseValid) {
-        printeln("DEBUG: Driving with vr=" + String(vr, 4));
         mecanumDrive(0, 0, vr);
     } else {
-        printeln("DEBUG: Pose invalid, turning off motors");
         turnOffMotors();
     }
     return false;
@@ -488,56 +522,6 @@ bool moveStrafeToY(double targetY, double power) {
     return false; // still moving
 }
 
-// FIXED: Now properly uses robot-frame coordinates
-bool goToPose(double xT, double yT, double thetaT) {
-    Pose p = getArucoMarkerPose();
-
-    // Compute errors in world frame
-    double ex = xT - p.x;
-    double ey = yT - p.y;
-    double eTheta = normalizeAngle(thetaT - p.theta);
-
-    // Convert to robot frame (forward/strafe relative to robot heading)
-    double ct = cos(p.theta);
-    double st = sin(p.theta);
-    double ex_r = ex * ct + ey * st;   // forward error
-    double ey_r = ex * st - ey * ct;   // strafe error (flipped sign to fix direction)
-
-    // Check if we're done
-    bool posDone = (fabs(ex) < POS_THRESHOLD && fabs(ey) < POS_THRESHOLD);
-    // bool angleDone = (fabs(eTheta) < ANGLE_THRESHOLD);
-
-    // if (posDone && angleDone) {
-    //     turnOffMotors();
-    //     return true;
-    // }
-    if (posDone) {
-        turnOffMotors();
-        return true;
-    }
-
-    // Compute control commands in robot frame
-    double Kp_lin = 1.1;
-    double Kp_strafe = 1.1;
-    double Kp_rot = 1.0;
-
-    double vx = ex_r * Kp_lin;      // FIXED: use ex_r instead of ex
-    double vy = ey_r * Kp_strafe;   // FIXED: use ey_r instead of ey
-    double vr = eTheta * Kp_rot;
-
-    // Limit speeds
-    vx = constrain(vx, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED);
-    vy = constrain(vy, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED);
-    vr = constrain(vr, -MAX_ROTATION_SPEED, MAX_ROTATION_SPEED);
-
-    if (poseValid) {
-        mecanumDrive(vx, vy, 0);
-    } else {
-        turnOffMotors();
-    }
-    return false;
-}
-
 // ============================================================================
 // SENSOR FUNCTIONS
 // ============================================================================
@@ -556,7 +540,7 @@ bool updateFlameSensor(unsigned long now) {
     int sensorValue = digitalRead(THERMISTOR);
 
     // flame is present when sensor is HIGH
-    if (sensorValue == HIGH) {
+    if (sensorValue == LOW) {
         lastTriggerTime = now;
     }
 
@@ -626,37 +610,21 @@ void resetPathProgress() {
     currentPathSegment = 0;
 }
 
-bool goPath(const PathSegment* segments, size_t segmentCount) {
-    if (!segments || segmentCount == 0) {
-        turnOffMotors();
-        return true;
-    }
-
-    if (currentPathSegment >= segmentCount) {
-        turnOffMotors();
-        return true;
-    }
-
-    const PathSegment& target = segments[currentPathSegment];
-
-    if (goToPose(target.x, target.y, target.theta)) {
-        currentPathSegment++;
-        if (currentPathSegment >= segmentCount) {
-            turnOffMotors();
-            return true;
-        }
-    }
-
-    return false;
-}
-
 // ============================================================================
 // MAIN FUNCTIONS
 // ============================================================================
 
-enum PathState { START1, MOVE, TOPL, TOP2, TOP3, TOP4, TOP5, TOP6, 
+enum PathState { START1, MOVE, TOPL, TOPL2,
+    CHECK_MISSION_SITE_DISTANCE,
+
+    TOP2, 
+
+    CANDLE1, CANDLE2, CANDLE3, CANDLE4,
+
+    TOP3, TOP4, TOP5, TOP6, 
     CHECK_OBSTACLE_TOP1,
     CHECK_OBSTACLE_TOP2F, 
+    CHECK_OBSTACLE_TOP2FF,
     CHECK_OBSTACLE_TOP2, 
     CHECK_OBSTACLE_TOP3F, 
 
@@ -697,41 +665,10 @@ void setup() {
     initSensors();
 
     printeln("Ready!");
-    printeln("Wait 3 seconds...");
-    delay(3000);
+    printeln("Wait 2 seconds...");
+    delay(2000);
     printeln("GO");
 }
-
-// void loop() {
-    // unsigned long now = millis();
-
-    // Pose p = getArucoMarkerPose();   // force update at start of loop
-    // mecanumDrive(0.25, 0, 0);
-
-    // printe("FIRE SUPPRESION LOCATION: ");
-    // if (Enes100.isVisible()) {
-    //   printeln("(" + String(getArucoMarkerPose().x) + ", " + String(getArucoMarkerPose().y) + ") at " + String(getArucoMarkerPose().theta));
-    // }
-
-    // printe("Front distance: ");
-    // printeln(String(getFrontDistance(), 3));
-    // printe("Right distance: ");
-    // printeln(String(getRightDistance(), 3));
-    // printe("Left distance: ");
-    // printeln(String(getLeftDistance(), 3));
-
-  // digitalWrite(FAN_PIN, HIGH);
-  // printeln("ON ");
-  // delay(2000);
-  // digitalWrite(FAN_PIN, LOW);
-  // printeln("OFF ");
-  // delay(2000);
-
-  // updateDrive(now);        // motor control
-//   updateAllUltrasonics(now); // read US sensors
-  // updateLimitSwitch();    // read limit switches
-  // printeln("Flame sensor on: " + String(updateFlameSensor(now))); // read thermistor + control fan
-// }
 
 void testMissionSensing() {
     unsigned long now = millis();
@@ -747,7 +684,6 @@ void testMissionSensing() {
 }
 
 void testObstacleSensing() {
-
     unsigned long now = millis();
 
     printe("Front distance: ");
@@ -758,7 +694,6 @@ void testObstacleSensing() {
     printeln(String(getLeftDistance(), 3));
 
     updateAllUltrasonics(now); // read US sensors
-
 }
 
 void testFan() {
@@ -775,7 +710,7 @@ void loop() {
 
     if (testPath == START1) {
         if (!printed) {
-                printeln("Scanning for ArUco marker");
+                printeln("Scanning for ArUco marker...");
                 printed = true;
             }
             if (Enes100.isVisible()) {
@@ -786,44 +721,91 @@ void loop() {
         Pose pose = getArucoMarkerPose();
         if (pose.theta > 0) {
             printeln("Detected OTV at TOP");
-            printeln("turning to face mission site");
+            printeln("Turning to face mission site");
             testPath = TOPL;
         }else {
-            printeln("Detected OTV at BOTTOM");
+            printeln("Detected OTV at BOTTOM. Doing nothing (path not created)");
             testPath = BOTTOM1;
         }
     } else if (testPath == TOPL) {
-        // going to mission site
-        bool a = turnToAngle(-1.5708, 0.22); // TUNE
-        if (a) {
+        // going to mission site by turning around
+        mecanumDrive(0, 0, 0.27);
+        delay(2900);
+        turnOffMotors();
+        delay(2000);
+        printeln("turning at smaller speed");
+        testPath = TOPL2;
+    } else if (testPath == TOPL2) {
+        // adjusting the turn angle
+        if (turnToAngleSmall(-1.5708, 0.25, true)) {
             printeln("moving to mission site");
             testPath = TOP2;
+            obstaclePauseActive = false;
+            delay(1000);
         }
-    } else if (testPath == TOP2) {
-        // going to obstacle zone
-            if (moveLongToY(0.75, 0.25)) {
+    } else if (testPath == CHECK_MISSION_SITE_DISTANCE) {
+        if (!obstaclePauseActive) {
+            obstaclePauseActive = true;
+            obstaclePauseStart = now;
+            printeln("Pausing to check mission site distance...");
+        } else if (now - obstaclePauseStart >= OBSTACLE_PAUSE_MS) {
+            float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLES, OBSTACLE_SAMPLE_DELAY_MS);
+            obstaclePauseActive = false;
+            if (avgFront < 2.0) {
+                printeln("Front sensor readings close enough");
                 printeln("moving backwards");
-                testPath = TOP3; // do the mission stuff after this step
+                testPath = TOP3;
+            } else {
+                printeln("Mission site distance is " + String(avgFront, 2) + " cm");
+                mecanumDrive(0.38, 0, 0);
+                delay(500);
+                turnOffMotors();
+                delay(2000); // 2 seconds buffer
+                printeln("moving backwards");
+                testPath = TOP3;
             }
-    }else {
-        // printeln("DEBUG: No case matched for testPath = " + String(testPath));
+        }
+    }else if (testPath == TOP2) {
+        // going to mission site
+            if (moveLongToY(0.85, 0.24)) {
+                delay(2000); // 2 second delay
+                mecanumDrive(0, 0.33, 0); // strafe to robot's right a little bit
+                delay(750);
+                turnOffMotors();
+                delay(1000);
+                testPath = CHECK_MISSION_SITE_DISTANCE; // do the mission stuff after this step
+            }
+    }else if (testPath == CANDLE1) {
+
+        // updateFlameSensor(now);
+
+        // if (updateFlameSensor)
+
     }
+
+
     switch(testPath) {
         case TOP3:
             // moving backwards
             if (moveLongToY(1.5, 0.25)) {
+                // turn angle
+                mecanumDrive(0, 0, -0.25);
+                delay(1300);
+                turnOffMotors();
+                delay(1000);
+                printeln("turning to face obstacles");
                 testPath = TOP4;
             }
         break;
 
         case TOP4:
-            if (turnToAngle(0, 0.25)) {
+            if (turnToAngleSmall(0, 0.25, false)) {
                 testPath = TOP5;
             }
         break;
 
         case TOP5:
-            if (moveLongToX(0.65, 0.25)) {
+            if (moveLongToX(0.60, 0.25)) {
                 obstaclePauseActive = false;
                 testPath = CHECK_OBSTACLE_TOP1;
             }
@@ -853,7 +835,15 @@ void loop() {
         case CHECK_OBSTACLE_TOP2F:
             if (moveStrafeToY(1.0, 0.35)) {
                 obstaclePauseActive = false;
+                testPath = CHECK_OBSTACLE_TOP2FF;
+            }
+        break;
+
+        case CHECK_OBSTACLE_TOP2FF:
+            // adjusting due to strafe drift
+            if (turnToAngleSmall(0, 0.25, true)) {
                 testPath = CHECK_OBSTACLE_TOP2;
+                obstaclePauseActive = false;
             }
         break;
 
