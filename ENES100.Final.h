@@ -40,7 +40,7 @@ enum MotorID { FR = 1, FL = 2, BR = 3, BL = 4 };
 enum MotorDirection { FORWARD = 1, BACKWARD = 2, OFF = 3 };
 
 // Obstacle avoidance thresholds (cm)
-const float FRONT_THRESH = 25.0f;
+const float FRONT_THRESH = 33.0f;
 const float SIDE_THRESH = 15.0f;
 
 // Control parameters
@@ -53,7 +53,7 @@ const double STRAFE_K_P = 0.8;
 const double TURN_K_P = 1.2;
 
 // Position/angle thresholds
-const double POS_THRESHOLD = 0.08;  // 4 cm
+const double POS_THRESHOLD = 0.06;  // 4 cm
 const double ANGLE_THRESHOLD = 0.09;  // radians (~3.5 degrees)
 
 // Speed limits
@@ -242,6 +242,25 @@ float getFrontDistanceAverage(uint8_t samples, unsigned long sampleDelayMs) {
     return sum / static_cast<float>(validSamples);
 }
 
+float getRightDistanceAverage(uint8_t samples, unsigned long sampleDelayMs) {
+    if (samples == 0) return -1.0f;
+
+    float sum = 0.0f;
+    uint8_t validSamples = 0;
+    for (uint8_t i = 0; i < samples; i++) {
+        float reading = readUltrasonic(usRight.trig, usRight.echo);
+        if (reading > 0.0f) {
+            sum += reading;
+            validSamples++;
+        }
+        if (sampleDelayMs > 0) {
+            delay(sampleDelayMs);
+        }
+    }
+    if (validSamples == 0) return -1.0f;
+    return sum / static_cast<float>(validSamples);
+}
+
 // ============================================================================
 // MOTOR CONTROL FUNCTIONS
 // ============================================================================
@@ -351,36 +370,69 @@ void updateDrive(unsigned long now) {
 // ============================================================================
 
 // direction = true = CW, false = CCW
-bool turnToAngleSmall(double thetaTarget, double power, bool direction) {
+bool isCW = false;
+void setTurnDirection(double thetaTarget) {
+    Pose p = {Enes100.getX(), Enes100.getY(), Enes100.getTheta(), millis()};
+    double err = thetaTarget - p.theta;
+
+    if (err < 0) {
+        isCW = true;
+    }else {
+        isCW = false;
+    }
+}
+bool turnToAngleSmall(double thetaTarget, double power) {
     Pose p = {Enes100.getX(), Enes100.getY(), Enes100.getTheta(), millis()};
     double error = fabs(thetaTarget - p.theta);
-    if (direction == true) {
-            // mecanumDrive(0, 0, -1.0 * power);
+    if (error < 0.06) {
+        return true;
+    }
+    if (isCW == true) {
+        mecanumDrive(0, 0, power);
+        delay(150);
+        turnOffMotors();
+        delay(1200);
+    }else {
+        mecanumDrive(0, 0, -1.0 * power);
+        delay(150);
+        turnOffMotors();
+        delay(1000);
+    }
+    return false;
+}
+
+// direction = true = CW, false = CCW
+bool isForward = false;
+void setLongDirection(double thetaTarget) {
+    Pose p = {Enes100.getX(), Enes100.getY(), Enes100.getTheta(), millis()};
+    double err = thetaTarget - p.theta;
+
+    if (err < 0) {
+        isCW = true;
+    }else {
+        isCW = false;
+    }
+}
+bool moveToLongSmall(double target, double power, bool isX) {
+    Pose p = {Enes100.getX(), Enes100.getY(), Enes100.getTheta(), millis()};
+    double error = fabs(target - p.x);
+    if (error < 0.05) {
+        return true;
+    }
+    if (isCW == true) {
         mecanumDrive(0, 0, power);
         delay(150);
         turnOffMotors();
         delay(1000);
-
-        if (error < 0.05) {
-            return true;
-        }else {
-            return false;
-        }
     }else {
         mecanumDrive(0, 0, -1.0 * power);
         delay(200);
         turnOffMotors();
         delay(1000);
-
-        if (error < 0.05) {
-            return true;
-        }else {
-            return false;
-        }
     }
+    return false;
 }
 
-// direction = true = CWW, false = CW
 bool turnToAngle(double thetaTarget, double power, bool direction) {
     Pose p = getArucoMarkerPose();
     double error = (thetaTarget - p.theta);
@@ -492,6 +544,35 @@ bool moveStrafeToX(double targetX, double power) {
         turnOffMotors();
     }
     
+    return false; // still moving
+}
+bool moveStrafeToRightSensor(double targetDistanceRight, double power) {
+
+    Pose p = getArucoMarkerPose();
+    float right = getRightDistanceAverage(5, 0);
+    power = constrain(power, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED);
+
+    double errorX = (right - targetDistanceRight);
+    double distanceX = fabs(errorX);
+
+    if (distanceX < 1.5) {
+        return true;
+    }
+
+    // Determine if the target is in front or behind the robot
+    double forwardComponent = errorX;
+
+    // Auto-select forward/backward direction
+    double drivePower = (forwardComponent >= 0) ? power : -power;
+
+    if (poseValid) {
+        mecanumDrive(0, drivePower, 0);
+        delay(200);
+        turnOffMotors();
+        delay(1000);
+    }else {
+        turnOffMotors();
+    }
     return false; // still moving
 }
 bool moveStrafeToY(double targetY, double power) {
@@ -617,26 +698,40 @@ void resetPathProgress() {
 enum PathState { START1, MOVE, TOPL, TOPL2,
     CHECK_MISSION_SITE_DISTANCE,
 
-    TOP2, 
+    TOP2, TOP22, TOP222, TOP2222,
 
     CANDLE1, CANDLE2, CANDLE3, CANDLE4,
 
-    TOP3, TOP4, TOP5, TOP6, 
+    TOP3, TOP4, 
+    TOP44,
+    TOP444,
+    TOP5, TOP6, 
     CHECK_OBSTACLE_TOP1,
     CHECK_OBSTACLE_TOP2F, 
+    CHECK_OBSTACLE_TOP2FFF,
     CHECK_OBSTACLE_TOP2FF,
     CHECK_OBSTACLE_TOP2, 
     CHECK_OBSTACLE_TOP3F, 
+    CHECK_OBSTACLE_TOP3FF,
+    CHECK_OBSTACLE_TOP3FFF,
 
     FORWARD_SECOND_ROW,
     MOVE_TO_SECOND_ROW_TOP,
+    MOVE_TO_SECOND_ROW_TOP_HALF,
+    MOVE_TO_SECOND_ROW_TOP_HALF_R,
+    MOVE_TO_SECOND_ROW_TOP_ROTATE,
+    MOVE_TO_SECOND_ROW_TOP_ADJUST,
     SECOND_ROW_TOP,
+    SECOND_ROW_MIDDLEFF,
     SECOND_ROW_MIDDLEF,
     SECOND_ROW_MIDDLE,
     SECOND_ROW_BOTTOMF,
+    SECOND_ROW_BOTTOMFF,
+    SECOND_ROW_MIDDLEFFF,
     FORWARD_THIRD_ROW,
     GO_TO_LIMBO,
     GO_UNDER_LIMBO,
+    GO_TO_LIMBO_ROTATE,
 
     BOTTOM1, BOTTOM2, BOTTOM3 };
 PathState testPath = START1;
@@ -683,19 +778,6 @@ void testMissionSensing() {
     delay(50);
 }
 
-void testObstacleSensing() {
-    unsigned long now = millis();
-
-    printe("Front distance: ");
-    printeln(String(getFrontDistance(), 3));
-    printe("Right distance: ");
-    printeln(String(getRightDistance(), 3));
-    printe("Left distance: ");
-    printeln(String(getLeftDistance(), 3));
-
-    updateAllUltrasonics(now); // read US sensors
-}
-
 void testFan() {
     printeln("FAN ON");
     digitalWrite(FAN_PIN, HIGH);
@@ -704,6 +786,20 @@ void testFan() {
     digitalWrite(FAN_PIN, LOW);
     delay(3000);
 }
+
+void testSideSensors() {
+
+    float right = readUltrasonic(usRight.trig, usRight.echo);
+    float left = readUltrasonic(usLeft.trig, usLeft.echo);
+    printeln(String(left) + ", " + String(right));
+
+    
+
+}
+
+// void loop() {
+//     testSideSensors();
+// }
 
 void loop() {
     unsigned long now = millis();
@@ -732,57 +828,93 @@ void loop() {
         mecanumDrive(0, 0, 0.27);
         delay(2900);
         turnOffMotors();
-        delay(2000);
+        delay(1000);
         printeln("turning at smaller speed");
+        setTurnDirection(-1.5708);
+        delay(1000);
         testPath = TOPL2;
     } else if (testPath == TOPL2) {
         // adjusting the turn angle
-        if (turnToAngleSmall(-1.5708, 0.25, true)) {
+        if (turnToAngleSmall(-1.5708, 0.25)) {
             printeln("moving to mission site");
             testPath = TOP2;
-            obstaclePauseActive = false;
             delay(1000);
-        }
-    } else if (testPath == CHECK_MISSION_SITE_DISTANCE) {
-        if (!obstaclePauseActive) {
-            obstaclePauseActive = true;
-            obstaclePauseStart = now;
-            printeln("Pausing to check mission site distance...");
-        } else if (now - obstaclePauseStart >= OBSTACLE_PAUSE_MS) {
-            float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLES, OBSTACLE_SAMPLE_DELAY_MS);
-            obstaclePauseActive = false;
-            if (avgFront < 2.0) {
-                printeln("Front sensor readings close enough");
-                printeln("moving backwards");
-                testPath = TOP3;
-            } else {
-                printeln("Mission site distance is " + String(avgFront, 2) + " cm");
-                mecanumDrive(0.38, 0, 0);
-                delay(500);
-                turnOffMotors();
-                delay(2000); // 2 seconds buffer
-                printeln("moving backwards");
-                testPath = TOP3;
-            }
         }
     }else if (testPath == TOP2) {
         // going to mission site
-            if (moveLongToY(0.85, 0.24)) {
-                delay(2000); // 2 second delay
-                mecanumDrive(0, 0.33, 0); // strafe to robot's right a little bit
-                delay(750);
-                turnOffMotors();
-                delay(1000);
-                testPath = CHECK_MISSION_SITE_DISTANCE; // do the mission stuff after this step
-            }
+        if (moveLongToY(0.95, 0.24)) {
+            delay(1000);
+            testPath = TOP22; // do the mission stuff after this step
+        }
+    }else if (testPath == TOP22) {
+
+        if (moveStrafeToX(0.23, 0.3)) {
+            setTurnDirection(-1.5708);
+            delay(1000);
+            testPath = TOP222;
+        }
+
+    }else if (testPath == TOP222) {
+
+        if (turnToAngleSmall(-1.5708, 0.25)) {
+            testPath = TOP2222;
+            delay(1000);
+        }
+
+    }
+
+    else if (testPath == TOP2222) {
+
+        // aligning to right candle(s)
+        if (moveStrafeToRightSensor(31.5, 0.31)) {
+            testPath = CHECK_MISSION_SITE_DISTANCE;
+            delay(1000);
+        }
+
+    }
+    
+    else if (testPath == CHECK_MISSION_SITE_DISTANCE) {
+        mecanumDrive(0.38, 0, 0); // ram into mission site
+        delay(300);
+        turnOffMotors();
+        delay(1000); // 2 seconds buffer
+        printeln("moving backwards");
+        testPath = CANDLE1;
     }else if (testPath == CANDLE1) {
 
         // updateFlameSensor(now);
 
         // if (updateFlameSensor)
+        testPath = CANDLE2;
+    }else if (testPath == CANDLE2) {
 
+        // updateFlameSensor(now);
+
+        mecanumDrive(-0.25, 0, 0);
+        delay(750);
+        turnOffMotors();
+        delay(1000);
+        testPath = CANDLE3;
+    }else if (testPath == CANDLE3) {
+        // aligning to left candle(s)
+        if (moveStrafeToRightSensor(45.0, 0.31)) {
+            testPath = CANDLE4;
+            delay(1000);
+            mecanumDrive(0.26, 0, 0);
+            delay(1100);
+            turnOffMotors();
+            delay(1000);
+        }
+    }else if (testPath == CANDLE4) {
+
+        // updateFlameSensor(now);
+
+        mecanumDrive(-0.25, 0, 0);
+        delay(750);
+        turnOffMotors();
+        delay(1000);
+        testPath = TOP3;
     }
-
 
     switch(testPath) {
         case TOP3:
@@ -795,19 +927,40 @@ void loop() {
                 delay(1000);
                 printeln("turning to face obstacles");
                 testPath = TOP4;
+                setTurnDirection(0);
+                delay(1000);
             }
         break;
 
         case TOP4:
-            if (turnToAngleSmall(0, 0.25, false)) {
+            if (turnToAngleSmall(0, 0.25)) {
+                testPath = TOP44;
+                delay(1000);
+            }
+        break;
+
+        case TOP44:
+            // adjust coordinate back
+            if (moveStrafeToY(1.5, 0.35)) {
+                testPath = TOP444;
+                setTurnDirection(0);
+                delay(1000);
+            }
+        break;
+
+        case TOP444:
+            // adjust coordinate back
+            if (turnToAngleSmall(0, 0.25)) {
                 testPath = TOP5;
+                delay(1000);
             }
         break;
 
         case TOP5:
-            if (moveLongToX(0.60, 0.25)) {
+            if (moveLongToX(0.58, 0.25)) {
                 obstaclePauseActive = false;
                 testPath = CHECK_OBSTACLE_TOP1;
+                delay(1000);
             }
         break;
 
@@ -822,12 +975,15 @@ void loop() {
                 if (avgFront < 0) {
                     printeln("Front sensor readings invalid; assuming clear path");
                     testPath = FORWARD_SECOND_ROW;
+                    delay(1000);
                 } else if (avgFront < FRONT_THRESH) {
                     printeln("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = CHECK_OBSTACLE_TOP2F;
+                    delay(1000);
                 } else {
                     printeln("No obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = FORWARD_SECOND_ROW;
+                    delay(1000);
                 }
             }
         break;
@@ -836,12 +992,22 @@ void loop() {
             if (moveStrafeToY(1.0, 0.35)) {
                 obstaclePauseActive = false;
                 testPath = CHECK_OBSTACLE_TOP2FF;
+                delay(1000);
+                setTurnDirection(0);
+                delay(1000);
             }
         break;
 
         case CHECK_OBSTACLE_TOP2FF:
             // adjusting due to strafe drift
-            if (turnToAngleSmall(0, 0.25, true)) {
+            if (turnToAngleSmall(0, 0.25)) {
+                testPath = CHECK_OBSTACLE_TOP2FFF;
+            }
+        break;
+
+        case CHECK_OBSTACLE_TOP2FFF:
+            // adjusting due to strafe drift
+            if (moveLongToX(0.62, 0.24)) {
                 testPath = CHECK_OBSTACLE_TOP2;
                 obstaclePauseActive = false;
             }
@@ -858,12 +1024,15 @@ void loop() {
                 if (avgFront < 0) {
                     printeln("Front sensor readings invalid; assuming clear path");
                     testPath = FORWARD_SECOND_ROW;
+                    delay(1000);
                 } else if (avgFront < FRONT_THRESH) {
                     printeln("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = CHECK_OBSTACLE_TOP3F;
+                    delay(1000);
                 } else {
                     printeln("No obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = FORWARD_SECOND_ROW;
+                    delay(1000);
                 }
             }
         break;
@@ -871,22 +1040,76 @@ void loop() {
         case CHECK_OBSTACLE_TOP3F:
             if (moveStrafeToY(0.5, 0.35)) {
                 obstaclePauseActive = false;
-                testPath = FORWARD_SECOND_ROW;
+                testPath = CHECK_OBSTACLE_TOP3FF;
+                setTurnDirection(0);
+                delay(1000);
+            }
+        break;
+
+        case CHECK_OBSTACLE_TOP3FF:
+            if (turnToAngleSmall(0, 0.25)) {
+                obstaclePauseActive = false;
+                testPath = CHECK_OBSTACLE_TOP3FFF;
+                delay(1000);
+            }
+        break;
+
+        case CHECK_OBSTACLE_TOP3FFF:
+            // go past the first row of obstacles
+            if (moveLongToX(1.45, 0.25)) {
+                testPath = MOVE_TO_SECOND_ROW_TOP_HALF;
+                delay(1000);
+            }
+        break;
+
+        case MOVE_TO_SECOND_ROW_TOP_HALF:
+            // go half the way, then adjust angle
+            if (moveStrafeToY(0.95, 0.35)) {
+                testPath = MOVE_TO_SECOND_ROW_TOP_HALF_R;
+                setTurnDirection(0);
+                delay(1000);
+            }
+        break;
+
+        case MOVE_TO_SECOND_ROW_TOP_HALF_R:
+            // go half the way, then adjust angle
+            if (turnToAngleSmall(0, 0.25)) {
+                testPath = MOVE_TO_SECOND_ROW_TOP;
+                delay(1000);
             }
         break;
 
         case FORWARD_SECOND_ROW:
             // go past the first row of obstacles
-            if (moveLongToX(1.65, 0.25)) {
+            if (moveLongToX(1.45, 0.25)) {
                 testPath = MOVE_TO_SECOND_ROW_TOP;
+                delay(1000);
             }
         break;
 
         case MOVE_TO_SECOND_ROW_TOP:
             // go to the top of the second row
             if (moveStrafeToY(1.5, 0.35)) {
+                testPath = MOVE_TO_SECOND_ROW_TOP_ROTATE;
+                setTurnDirection(0);
+                delay(1000);
+            }
+        break;
+
+        case MOVE_TO_SECOND_ROW_TOP_ROTATE:
+            // go to the top of the second row
+            if (turnToAngleSmall(0, 0.25)) {
+                testPath = MOVE_TO_SECOND_ROW_TOP_ADJUST;
+                delay(1000);
+            }
+        break;
+
+        case MOVE_TO_SECOND_ROW_TOP_ADJUST:
+            // go to the top of the second row
+            if (moveLongToX(1.57, 0.25)) {
                 obstaclePauseActive = false;
                 testPath = SECOND_ROW_TOP;
+                delay(1000);
             }
         break;
 
@@ -902,12 +1125,15 @@ void loop() {
                 if (avgFront < 0) {
                     printeln("Front sensor readings invalid; assuming clear path");
                     testPath = FORWARD_THIRD_ROW;
+                    delay(1000);
                 } else if (avgFront < FRONT_THRESH) {
                     printeln("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = SECOND_ROW_MIDDLEF;
+                    delay(1000);
                 } else {
                     printeln("No obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = FORWARD_THIRD_ROW;
+                    delay(1000);
                 }
             }
         break;
@@ -915,8 +1141,26 @@ void loop() {
         case SECOND_ROW_MIDDLEF:
             // strafing to the second row to detect the middle obstacle
             if (moveStrafeToY(1.0, 0.35)) {
+                testPath = SECOND_ROW_MIDDLEFF;
+                setTurnDirection(0);
+                delay(1000);
+            }
+        break;
+
+        case SECOND_ROW_MIDDLEFF:
+            // strafing to the second row to detect the middle obstacle
+            if (turnToAngleSmall(0, 0.25)) {
+                testPath = SECOND_ROW_MIDDLEFFF;
+                delay(1000);
+            }
+        break;
+
+        case SECOND_ROW_MIDDLEFFF:
+            // strafing to the second row to detect the middle obstacle
+            if (moveLongToX(1.57, 0.24)) {
                 obstaclePauseActive = false;
                 testPath = SECOND_ROW_MIDDLE;
+                delay(1000);
             }
         break;
 
@@ -932,12 +1176,15 @@ void loop() {
                 if (avgFront < 0) {
                     printeln("Front sensor readings invalid; assuming clear path");
                     testPath = FORWARD_THIRD_ROW;
+                    delay(1000);
                 } else if (avgFront < FRONT_THRESH) {
                     printeln("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = SECOND_ROW_BOTTOMF;
+                    delay(1000);
                 } else {
                     printeln("No obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = FORWARD_THIRD_ROW;
+                    delay(1000);
                 }
             }
         break;
@@ -945,8 +1192,18 @@ void loop() {
         case SECOND_ROW_BOTTOMF:
             // strafing to the third row
             if (moveStrafeToY(0.5, 0.35)) {
+                testPath = SECOND_ROW_BOTTOMFF;
+                setTurnDirection(0);
+                delay(1000);
+            }
+        break;
+
+        case SECOND_ROW_BOTTOMFF:
+            // strafing to the third row
+            if (turnToAngleSmall(0, 0.25)) {
                 obstaclePauseActive = false;
                 testPath = FORWARD_THIRD_ROW;
+                delay(1000);
             }
         break;
 
@@ -959,8 +1216,18 @@ void loop() {
 
         case GO_TO_LIMBO:
             // strafing to the limbo area
-            if (moveStrafeToY(1.6, 0.35)) {
+            if (moveStrafeToY(1.55, 0.35)) {
+                testPath = GO_TO_LIMBO_ROTATE;
+                setTurnDirection(0);
+                delay(1000);
+            }
+        break;
+
+        case GO_TO_LIMBO_ROTATE:
+            // adjusting angle
+            if (turnToAngleSmall(0, 0.25)) {
                 testPath = GO_UNDER_LIMBO;
+                delay(1000);
             }
         break;
 
