@@ -1,69 +1,102 @@
+/**
+ * ENES100 Final Project - Autonomous Firefighting Robot
+ *
+ * This Arduino sketch implements an autonomous robot for the ENES100 final project.
+ * The robot navigates through an obstacle course, detects and extinguishes candles
+ * at a mission site, and completes various navigation challenges.
+ *
+ * Key Features:
+ * - ArUco marker pose detection and tracking
+ * - Mecanum wheel drive system for omnidirectional movement
+ * - Ultrasonic sensors for obstacle detection
+ * - Flame sensor and fan system for candle extinguishing
+ * - Limit switches for topography detection
+ * - State machine-based mission execution
+ *
+ * Hardware: Arduino Mega 2560 with custom sensor suite
+ * Dependencies: Enes100 library for communication
+ */
+
 #include "Enes100.h"
 
 // ============================================================================
 // PIN DEFINITIONS
 // ============================================================================
 
-// Motor pins - FR (Front Right)
-const uint8_t MOTOR1_I1 = 22, MOTOR1_I2 = 23, MOTOR1_ENA = 6;
+const int ROOM_NUMBER = 1120; // 1120
 
-// Motor pins - BR (Back Right)
-const uint8_t MOTOR1_I3 = 24, MOTOR1_I4 = 25, MOTOR1_ENB = 7;
+// Motor pins - Front Right (FR)
+const uint8_t MOTOR_FR_I1 = 22;
+const uint8_t MOTOR_FR_I2 = 23;
+const uint8_t MOTOR_FR_ENA = 6;
 
-// Motor pins - BL (Back Left)
-const uint8_t MOTOR2_I1 = 26, MOTOR2_I2 = 27, MOTOR2_ENA = 8;
+// Motor pins - Back Right (BR)
+const uint8_t MOTOR_BR_I1 = 24;
+const uint8_t MOTOR_BR_I2 = 25;
+const uint8_t MOTOR_BR_ENB = 7;
 
-// Motor pins - FL (Front Left)
-const uint8_t MOTOR2_I3 = 28, MOTOR2_I4 = 29, MOTOR2_ENB = 9;
+// Motor pins - Back Left (BL)
+const uint8_t MOTOR_BL_I1 = 26;
+const uint8_t MOTOR_BL_I2 = 27;
+const uint8_t MOTOR_BL_ENA = 8;
 
-// Ultrasonic sensors
-const uint8_t US_FRONT_ECHO = 40, US_FRONT_TRIG = 41;
-const uint8_t US_RIGHT_ECHO = 32, US_RIGHT_TRIG = 33;
-const uint8_t US_LEFT_ECHO = 34, US_LEFT_TRIG = 35;
+// Motor pins - Front Left (FL)
+const uint8_t MOTOR_FL_I1 = 28;
+const uint8_t MOTOR_FL_I2 = 29;
+const uint8_t MOTOR_FL_ENB = 9;
 
-// Limit switches
-const uint8_t LIMIT_LEFT = 36, LIMIT_RIGHT = 37;
+// Ultrasonic sensor pins
+const uint8_t US_FRONT_TRIG = 41;
+const uint8_t US_FRONT_ECHO = 40;
+const uint8_t US_RIGHT_TRIG = 33;
+const uint8_t US_RIGHT_ECHO = 32;
+const uint8_t US_LEFT_TRIG = 35;
+const uint8_t US_LEFT_ECHO = 34;
 
-// Thermistor module
-const uint8_t THERMISTOR = 45;
+// Limit switch pins
+const uint8_t LIMIT_LEFT = 36;
+const uint8_t LIMIT_RIGHT = 37;
+
+// Flame sensor and fan pins
+const uint8_t THERMISTOR_PIN = 45;
 const uint8_t FAN_PIN = 12;
 
 // WiFi module pins
-const uint8_t wifiModuleTX = A8, wifiModuleRX = A9, ARUCO_MARKER_ID = 67;
+const uint8_t WIFI_TX = A8;
+const uint8_t WIFI_RX = A9;
+const uint8_t ARUCO_MARKER_ID = 67;
 
 // ============================================================================
-// CONSTANTS0oi
+// CONSTANTS
 // ============================================================================
 
-// Motor identifiers
+// Motor identifiers and directions
 enum MotorID { FR = 1, FL = 2, BR = 3, BL = 4 };
 enum MotorDirection { FORWARD = 1, BACKWARD = 2, OFF = 3 };
 
-// Obstacle avoidance thresholds (cm)
-const float FRONT_THRESH = 33.0f;
-const float SIDE_THRESH = 15.0f;
+// Navigation thresholds
+const float OBSTACLE_FRONT_THRESHOLD = 33.0f;  // cm
+const float OBSTACLE_SIDE_THRESHOLD = 15.0f;   // cm
+const double POSITION_THRESHOLD = 0.06;        // meters (~6 cm)
+const double ANGLE_THRESHOLD = 0.09;           // radians (~5 degrees)
 
-// Control parameters
-const double HOLD_TIME = 1000.0;  // ms
-const unsigned long POSE_TIMEOUT = 250;  // ms
-
-// PID gains
-const double LONG_K_P = 0.8;
-const double STRAFE_K_P = 0.8;
-const double TURN_K_P = 1.2;
-
-// Position/angle thresholds
-const double POS_THRESHOLD = 0.06;  // 4 cm
-const double ANGLE_THRESHOLD = 0.09;  // radians (~3.5 degrees)
+// Timing constants
+const double HOLD_TIME = 1000.0;               // ms
+const unsigned long POSE_TIMEOUT = 250;        // ms
+const unsigned long OBSTACLE_PAUSE_DURATION = 1000;  // ms
+const unsigned long OBSTACLE_SAMPLE_DELAY = 0; // ms
 
 // Speed limits
 const double MAX_LINEAR_SPEED = 0.5;
-const double MAX_ROTATION_SPEED = 0.5;
+const double MAX_ROTATIONAL_SPEED = 0.5;
 
-// Obstacle pause behavior
-const unsigned long OBSTACLE_PAUSE_MS = 1000;
-const uint8_t OBSTACLE_SAMPLES = 8;
-const unsigned long OBSTACLE_SAMPLE_DELAY_MS = 0;
+// Obstacle detection parameters
+const uint8_t OBSTACLE_SAMPLE_COUNT = 8;
+
+// Movement timing constants
+const unsigned long STRAFE_DELAY = 250;          // ms
+const unsigned long TURN_DELAY = 800;            // ms
+const unsigned long GENERAL_DELAY = 1000;        // ms
 
 // ============================================================================
 // STRUCTURES
@@ -101,18 +134,24 @@ struct PathSegment {
 // ============================================================================
 
 bool ENES_INIT = false;
+bool SERIAL_INIT = true;
 Pose lastPose = {0, 0, 0, 0};
 bool poseValid = false;
 
-Ultrasonic usFront = {US_FRONT_TRIG, US_FRONT_ECHO, -1.0f, 0};
-Ultrasonic usLeft = {US_LEFT_TRIG, US_LEFT_ECHO, -1.0f, 0};
-Ultrasonic usRight = {US_RIGHT_TRIG, US_RIGHT_ECHO, -1.0f, 0};
+// Ultrasonic sensor instances
+Ultrasonic ultrasonicFront = {US_FRONT_TRIG, US_FRONT_ECHO, -1.0f, 0};
+Ultrasonic ultrasonicRight = {US_RIGHT_TRIG, US_RIGHT_ECHO, -1.0f, 0};
+Ultrasonic ultrasonicLeft = {US_LEFT_TRIG, US_LEFT_ECHO, -1.0f, 0};
 
+// Timing and state variables
 unsigned long lastTriggerTime = 0;
 unsigned long driveUntil = 0;
 TimedDrive currentTimedDrive = {0, 0, 0, 0, true};
-unsigned long obstaclePauseStart = 0;
-bool obstaclePauseActive = false;
+unsigned long obstaclePauseStartTime = 0;
+bool isObstaclePauseActive = false;
+
+// Mission state
+int candleCount = 0;
 
 // ============================================================================
 // INITIALIZATION FUNCTIONS
@@ -120,39 +159,56 @@ bool obstaclePauseActive = false;
 
 void initializeMotors() {
     // Set all motor pins as outputs
-    pinMode(MOTOR1_I1, OUTPUT); pinMode(MOTOR1_I2, OUTPUT); pinMode(MOTOR1_ENA, OUTPUT);
-    pinMode(MOTOR1_I3, OUTPUT); pinMode(MOTOR1_I4, OUTPUT); pinMode(MOTOR1_ENB, OUTPUT);
-    pinMode(MOTOR2_I1, OUTPUT); pinMode(MOTOR2_I2, OUTPUT); pinMode(MOTOR2_ENA, OUTPUT);
-    pinMode(MOTOR2_I3, OUTPUT); pinMode(MOTOR2_I4, OUTPUT); pinMode(MOTOR2_ENB, OUTPUT);
+    pinMode(MOTOR_FR_I1, OUTPUT);
+    pinMode(MOTOR_FR_I2, OUTPUT);
+    pinMode(MOTOR_FR_ENA, OUTPUT);
+    pinMode(MOTOR_BR_I1, OUTPUT);
+    pinMode(MOTOR_BR_I2, OUTPUT);
+    pinMode(MOTOR_BR_ENB, OUTPUT);
+    pinMode(MOTOR_BL_I1, OUTPUT);
+    pinMode(MOTOR_BL_I2, OUTPUT);
+    pinMode(MOTOR_BL_ENA, OUTPUT);
+    pinMode(MOTOR_FL_I1, OUTPUT);
+    pinMode(MOTOR_FL_I2, OUTPUT);
+    pinMode(MOTOR_FL_ENB, OUTPUT);
 
     // Initialize all motors to OFF
-    digitalWrite(MOTOR1_I1, LOW); digitalWrite(MOTOR1_I2, LOW); analogWrite(MOTOR1_ENA, 0);
-    digitalWrite(MOTOR1_I3, LOW); digitalWrite(MOTOR1_I4, LOW); analogWrite(MOTOR1_ENB, 0);
-    digitalWrite(MOTOR2_I1, LOW); digitalWrite(MOTOR2_I2, LOW); analogWrite(MOTOR2_ENA, 0);
-    digitalWrite(MOTOR2_I3, LOW); digitalWrite(MOTOR2_I4, LOW); analogWrite(MOTOR2_ENB, 0);
+    digitalWrite(MOTOR_FR_I1, LOW);
+    digitalWrite(MOTOR_FR_I2, LOW);
+    analogWrite(MOTOR_FR_ENA, 0);
+    digitalWrite(MOTOR_BR_I1, LOW);
+    digitalWrite(MOTOR_BR_I2, LOW);
+    analogWrite(MOTOR_BR_ENB, 0);
+    digitalWrite(MOTOR_BL_I1, LOW);
+    digitalWrite(MOTOR_BL_I2, LOW);
+    analogWrite(MOTOR_BL_ENA, 0);
+    digitalWrite(MOTOR_FL_I1, LOW);
+    digitalWrite(MOTOR_FL_I2, LOW);
+    analogWrite(MOTOR_FL_ENB, 0);
 }
 
 void initSensors() {
     // Ultrasonic sensors
-    pinMode(US_FRONT_ECHO, INPUT);
     pinMode(US_FRONT_TRIG, OUTPUT);
-    pinMode(US_RIGHT_ECHO, INPUT);
+    pinMode(US_FRONT_ECHO, INPUT);
     pinMode(US_RIGHT_TRIG, OUTPUT);
-    pinMode(US_LEFT_ECHO, INPUT);
+    pinMode(US_RIGHT_ECHO, INPUT);
     pinMode(US_LEFT_TRIG, OUTPUT);
+    pinMode(US_LEFT_ECHO, INPUT);
 
-    // Limit switches (with pull-up)
+    // Limit switches (with pull-up resistors)
     pinMode(LIMIT_LEFT, INPUT_PULLUP);
     pinMode(LIMIT_RIGHT, INPUT_PULLUP);
 
-    // Thermistor and fan
-    pinMode(THERMISTOR, INPUT_PULLUP);
+    // Flame sensor (thermistor) and fan
+    pinMode(THERMISTOR_PIN, INPUT_PULLUP);
     pinMode(FAN_PIN, OUTPUT);
     digitalWrite(FAN_PIN, LOW);
 }
 
 void initWIFI() {
-    Enes100.begin("Smoke Signal", FIRE, ARUCO_MARKER_ID, 1120, wifiModuleTX, wifiModuleRX);
+    delay(1000);
+    Enes100.begin("Smoke Signal", FIRE, ARUCO_MARKER_ID, ROOM_NUMBER, WIFI_TX, WIFI_RX);
     ENES_INIT = true;
 }
 
@@ -166,21 +222,12 @@ Pose getArucoMarkerPose() {
         pose = {Enes100.getX(), Enes100.getY(), Enes100.getTheta(), millis()};
         lastPose = pose;
         poseValid = true;
-        // printeln("DEBUG: ArUco visible, pose=(" + String(pose.x, 3) + ", " + String(pose.y, 3) + ", " + String(pose.theta, 4) + ")");
     } else {
         pose = lastPose;
         unsigned long age = millis() - lastPose.timestamp;
         poseValid = (age < POSE_TIMEOUT);
-        // printeln("DEBUG: ArUco not visible, using last pose age=" + String(age) + "ms, valid=" + String(poseValid));
     }
     return pose;
-}
-
-// Normalize angle to [-PI, PI]
-double normalizeAngle(double angle) {
-    while (angle > PI) angle -= 2.0 * PI;
-    while (angle < -PI) angle += 2.0 * PI;
-    return angle;
 }
 
 // ============================================================================
@@ -206,22 +253,9 @@ float readUltrasonic(uint8_t trig, uint8_t echo) {
     return (duration * 0.0343f) / 2.0f;
 }
 
-void updateUltrasonic(Ultrasonic& us, unsigned long now) {
-    if (now - us.lastUpdate >= Ultrasonic::UPDATE_INTERVAL) {
-        us.distance = readUltrasonic(us.trig, us.echo);
-        us.lastUpdate = now;
-    }
-}
-
-void updateAllUltrasonics(unsigned long now) {
-    updateUltrasonic(usFront, now);
-    updateUltrasonic(usRight, now);
-    updateUltrasonic(usLeft, now);
-}
-
-float getFrontDistance() { return usFront.distance; }
-float getLeftDistance() { return usLeft.distance; }
-float getRightDistance() { return usRight.distance; }
+float getFrontDistance() { return ultrasonicFront.distance; }
+float getLeftDistance() { return ultrasonicLeft.distance; }
+float getRightDistance() { return ultrasonicRight.distance; }
 
 float getFrontDistanceAverage(uint8_t samples, unsigned long sampleDelayMs) {
     if (samples == 0) return -1.0f;
@@ -229,7 +263,7 @@ float getFrontDistanceAverage(uint8_t samples, unsigned long sampleDelayMs) {
     float sum = 0.0f;
     uint8_t validSamples = 0;
     for (uint8_t i = 0; i < samples; i++) {
-        float reading = readUltrasonic(usFront.trig, usFront.echo);
+        float reading = readUltrasonic(ultrasonicFront.trig, ultrasonicFront.echo);
         if (reading > 0.0f) {
             sum += reading;
             validSamples++;
@@ -248,7 +282,26 @@ float getRightDistanceAverage(uint8_t samples, unsigned long sampleDelayMs) {
     float sum = 0.0f;
     uint8_t validSamples = 0;
     for (uint8_t i = 0; i < samples; i++) {
-        float reading = readUltrasonic(usRight.trig, usRight.echo);
+        float reading = readUltrasonic(ultrasonicRight.trig, ultrasonicRight.echo);
+        if (reading > 0.0f) {
+            sum += reading;
+            validSamples++;
+        }
+        if (sampleDelayMs > 0) {
+            delay(sampleDelayMs);
+        }
+    }
+    if (validSamples == 0) return -1.0f;
+    return sum / static_cast<float>(validSamples);
+}
+
+float getLeftDistanceAverage(uint8_t samples, unsigned long sampleDelayMs) {
+    if (samples == 0) return -1.0f;
+
+    float sum = 0.0f;
+    uint8_t validSamples = 0;
+    for (uint8_t i = 0; i < samples; i++) {
+        float reading = readUltrasonic(ultrasonicLeft.trig, ultrasonicLeft.echo);
         if (reading > 0.0f) {
             sum += reading;
             validSamples++;
@@ -286,22 +339,30 @@ void setMotorSpeed(MotorID motorNumber, double normalized) {
 
     switch (motorNumber) {
         case FR:
-            pin1 = MOTOR1_I1; pin2 = MOTOR1_I2; pwmPin = MOTOR1_ENA;
+            pin1 = MOTOR_FR_I1;
+            pin2 = MOTOR_FR_I2;
+            pwmPin = MOTOR_FR_ENA;
             pin1State = (direction == BACKWARD);
             pin2State = (direction == FORWARD);
             break;
         case BR:
-            pin1 = MOTOR1_I3; pin2 = MOTOR1_I4; pwmPin = MOTOR1_ENB;
+            pin1 = MOTOR_BR_I1;
+            pin2 = MOTOR_BR_I2;
+            pwmPin = MOTOR_BR_ENB;
             pin1State = (direction == FORWARD);
             pin2State = (direction == BACKWARD);
             break;
         case BL:
-            pin1 = MOTOR2_I1; pin2 = MOTOR2_I2; pwmPin = MOTOR2_ENA;
+            pin1 = MOTOR_BL_I1;
+            pin2 = MOTOR_BL_I2;
+            pwmPin = MOTOR_BL_ENA;
             pin1State = (direction == FORWARD);
             pin2State = (direction == BACKWARD);
             break;
         case FL:
-            pin1 = MOTOR2_I3; pin2 = MOTOR2_I4; pwmPin = MOTOR2_ENB;
+            pin1 = MOTOR_FL_I1;
+            pin2 = MOTOR_FL_I2;
+            pwmPin = MOTOR_FL_ENB;
             pin1State = (direction == BACKWARD);
             pin2State = (direction == FORWARD);
             break;
@@ -344,91 +405,54 @@ void mecanumDrive(double vx, double vy, double vr) {
 }
 
 // ============================================================================
-// TIMED DRIVE FUNCTIONS
-// ============================================================================
-
-void startTimedDrive(TimedDrive& drive) {
-    driveUntil = millis() + drive.duration;
-    currentTimedDrive = drive;
-    currentTimedDrive.done = false;
-}
-
-void updateDrive(unsigned long now) {
-    if (now < driveUntil) {
-        mecanumDrive(currentTimedDrive.vx,
-                     currentTimedDrive.vy,
-                     currentTimedDrive.vr);
-    } else {
-        driveUntil = 0;
-        currentTimedDrive.done = true;
-        turnOffMotors();
-    }
-}
-
-// ============================================================================
 // NAVIGATION FUNCTIONS (FIXED BUGS)
 // ============================================================================
 
-// direction = true = CW, false = CCW
-bool isCW = false;
+// Turn direction: true = clockwise, false = counter-clockwise
+bool isTurningClockwise = false;
 void setTurnDirection(double thetaTarget) {
-    Pose p = {Enes100.getX(), Enes100.getY(), Enes100.getTheta(), millis()};
-    double err = thetaTarget - p.theta;
-
-    if (err < 0) {
-        isCW = true;
-    }else {
-        isCW = false;
-    }
+    double error = thetaTarget - Enes100.getTheta();
+    isTurningClockwise = (error < 0);
 }
 bool turnToAngleSmall(double thetaTarget, double power) {
     Pose p = {Enes100.getX(), Enes100.getY(), Enes100.getTheta(), millis()};
-    double error = fabs(thetaTarget - p.theta);
-    if (error < 0.06) {
+    double error = (thetaTarget - p.theta);
+    isTurningClockwise = (error < 0);
+    error = fabs(error);
+    if (error < 0.055) {
         return true;
     }
-    if (isCW == true) {
+    if (isTurningClockwise) {
         mecanumDrive(0, 0, power);
-        delay(150);
+        delay(175);
         turnOffMotors();
-        delay(1200);
-    }else {
-        mecanumDrive(0, 0, -1.0 * power);
-        delay(150);
+        delay(TURN_DELAY);
+    } else {
+        mecanumDrive(0, 0, -power);
+        delay(175);
         turnOffMotors();
-        delay(1000);
+        delay(TURN_DELAY);
     }
     return false;
 }
-
-// direction = true = CW, false = CCW
-bool isForward = false;
-void setLongDirection(double thetaTarget) {
+bool turnToAngleSmall(double thetaTarget, double power, int delayMS) {
     Pose p = {Enes100.getX(), Enes100.getY(), Enes100.getTheta(), millis()};
-    double err = thetaTarget - p.theta;
-
-    if (err < 0) {
-        isCW = true;
-    }else {
-        isCW = false;
-    }
-}
-bool moveToLongSmall(double target, double power, bool isX) {
-    Pose p = {Enes100.getX(), Enes100.getY(), Enes100.getTheta(), millis()};
-    double error = fabs(target - p.x);
-    if (error < 0.05) {
+    double error = (thetaTarget - p.theta);
+    isTurningClockwise = (error < 0);
+    error = fabs(error);
+    if (error < 0.07) {
         return true;
     }
-    if (isCW == true) {
+    if (isTurningClockwise) {
         mecanumDrive(0, 0, power);
-        delay(150);
+        delay(delayMS);
         turnOffMotors();
-        delay(1000);
-    }else {
-        mecanumDrive(0, 0, -1.0 * power);
-        delay(200);
+        delay(TURN_DELAY);
+    } else {
+        mecanumDrive(0, 0, -power);
+        delay(delayMS);
         turnOffMotors();
-        delay(1000);
+        delay(TURN_DELAY);
     }
     return false;
 }
@@ -437,11 +461,7 @@ bool turnToAngle(double thetaTarget, double power, bool direction) {
     Pose p = getArucoMarkerPose();
     double error = (thetaTarget - p.theta);
 
-    // printeln("D:poseValid=" + String(poseValid) + ", error=" + String(error, 4) + ", target=" + String(thetaTarget, 4) + ", current=" + String(p.theta, 4));
-
     if (fabs(error) < ANGLE_THRESHOLD) {
-        // mecanumDrive(0, 0, power);
-        // delay(450);
         turnOffMotors();
         return true;
     }
@@ -450,12 +470,7 @@ bool turnToAngle(double thetaTarget, double power, bool direction) {
     if (direction == false) {
         vr = vr * -1.0;
     }
-    // if (error > 0) {
-    //     vr = power;
-    // }else {
-    //     vr = -1.0 * power;
-    // }
-    vr = constrain(vr, -MAX_ROTATION_SPEED, MAX_ROTATION_SPEED);
+    vr = constrain(vr, -MAX_ROTATIONAL_SPEED, MAX_ROTATIONAL_SPEED);
 
     if (poseValid) {
         mecanumDrive(0, 0, vr);
@@ -473,7 +488,7 @@ bool moveLongToX(double targetX, double power) {
     double errorX = (targetX - p.x);
     double distanceX = fabs(errorX);
 
-    if (distanceX < POS_THRESHOLD) {
+    if (distanceX < POSITION_THRESHOLD) {
         turnOffMotors();
         return true;
     }
@@ -500,7 +515,7 @@ bool moveLongToY(double targetY, double power) {
     double errorY = targetY - p.y;
     double distanceY = fabs(errorY);
 
-    if (distanceY < POS_THRESHOLD) {
+    if (distanceY < POSITION_THRESHOLD) {
         turnOffMotors();
         return true;
     }
@@ -527,7 +542,7 @@ bool moveStrafeToX(double targetX, double power) {
     double errorX = (targetX - p.x);
     double distanceX = fabs(errorX);
 
-    if (distanceX < POS_THRESHOLD) {
+    if (distanceX < POSITION_THRESHOLD) {
         turnOffMotors();
         return true;
     }
@@ -555,6 +570,35 @@ bool moveStrafeToRightSensor(double targetDistanceRight, double power) {
     double errorX = (right - targetDistanceRight);
     double distanceX = fabs(errorX);
 
+    if (distanceX < 1.0) {
+        return true;
+    }
+
+    // Determine if the target is in front or behind the robot
+    double forwardComponent = errorX;
+
+    // Auto-select forward/backward direction
+    double drivePower = (forwardComponent >= 0) ? power : -power;
+
+    if (poseValid) {
+        mecanumDrive(0, drivePower, 0);
+        delay(STRAFE_DELAY);
+        turnOffMotors();
+        delay(800);
+    }else {
+        turnOffMotors();
+    }
+    return false; // still moving
+}
+bool moveStrafeToRightSensor(double targetDistanceRight, double power, int delayMS) {
+
+    Pose p = getArucoMarkerPose();
+    float right = getRightDistanceAverage(5, 0);
+    power = constrain(power, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED);
+
+    double errorX = (right - targetDistanceRight);
+    double distanceX = fabs(errorX);
+
     if (distanceX < 1.5) {
         return true;
     }
@@ -567,9 +611,38 @@ bool moveStrafeToRightSensor(double targetDistanceRight, double power) {
 
     if (poseValid) {
         mecanumDrive(0, drivePower, 0);
-        delay(200);
+        delay(delayMS);
         turnOffMotors();
-        delay(1000);
+        delay(800);
+    }else {
+        turnOffMotors();
+    }
+    return false; // still moving
+}
+bool moveStrafeToLeftSensor(double targetDistanceLeft, double power) {
+
+    Pose p = getArucoMarkerPose();
+    float left = getLeftDistanceAverage(5, 0);
+    power = constrain(power, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED);
+
+    double errorX = (left - targetDistanceLeft);
+    double distanceX = fabs(errorX);
+
+    if (distanceX < 1.0) {
+        return true;
+    }
+
+    // Determine if the target is in front or behind the robot
+    double forwardComponent = -1.0 * errorX;
+
+    // Auto-select forward/backward direction
+    double drivePower = (forwardComponent >= 0) ? power : -power;
+
+    if (poseValid) {
+        mecanumDrive(0, drivePower, 0);
+        delay(250);
+        turnOffMotors();
+        delay(800);
     }else {
         turnOffMotors();
     }
@@ -583,7 +656,7 @@ bool moveStrafeToY(double targetY, double power) {
     double errorY = targetY - p.y;
     double distanceY = fabs(errorY);
 
-    if (distanceY < POS_THRESHOLD) {
+    if (distanceY < POSITION_THRESHOLD) {
         turnOffMotors();
         return true;
     }
@@ -607,27 +680,21 @@ bool moveStrafeToY(double targetY, double power) {
 // SENSOR FUNCTIONS
 // ============================================================================
 
-char checkLimitSwitches() {
+int checkLimitSwitches() {
     bool leftPressed = (digitalRead(LIMIT_LEFT) == LOW);
     bool rightPressed = (digitalRead(LIMIT_RIGHT) == LOW);
 
-    if (leftPressed && rightPressed) return 'C';
-    if (leftPressed) return 'A';
-    if (rightPressed) return 'B';
-    return 'N';
+    if (leftPressed && rightPressed) return TOP_C;
+    if (leftPressed) return TOP_A;
+    if (rightPressed) return TOP_B;
+    return -1;
 }
 
-bool updateFlameSensor(unsigned long now) {
-    int sensorValue = digitalRead(THERMISTOR);
+bool updateFlameSensor() {
+    int sensorValue = digitalRead(THERMISTOR_PIN);
 
-    // flame is present when sensor is HIGH
-    if (sensorValue == LOW) {
-        lastTriggerTime = now;
-    }
-
-    bool fanOn = (now - lastTriggerTime < HOLD_TIME);
-    digitalWrite(FAN_PIN, fanOn ? HIGH : LOW);
-    return fanOn;
+    // Flame is present when sensor reads LOW
+    return (sensorValue == LOW);
 }
 
 // ============================================================================
@@ -638,14 +705,18 @@ void printe(String msg) {
     if (ENES_INIT) {
         Enes100.print(msg);
     }
-    Serial.print(msg);
+    if (SERIAL_INIT) {
+        Serial.print(msg);
+    }
 }
 
 void printeln(String msg) {
     if (ENES_INIT) {
         Enes100.println(msg);
     }
-    Serial.println(msg);
+    if (SERIAL_INIT) {
+        Serial.println(msg);
+    }
 }
 
 void testEachMotor(unsigned long duration, double speed) {
@@ -669,29 +740,6 @@ void testEachMotor(unsigned long duration, double speed) {
 }
 
 // ============================================================================
-// WAYPOINT FUNCTIONS
-// ============================================================================
-
-const PathSegment defaultTopPath[] = {
-    {0.5, 1.5, PI / 2.0}, // rotate to correct heading
-    {0.5, 0.6, PI / 2.0} // then travel to mission site
-    // {0.5, 0.5, 0.0} // 
-};
-const size_t defaultTopPathLength = sizeof(defaultTopPath) / sizeof(defaultTopPath[0]);
-
-const PathSegment obstacleTop[] = {
-    {0.5, 1.5, PI / 2.0}, // move back to start
-    {0.5, 1.5, 0}, // turn forward
-    {1.2, 1.5, 0} // facing first "obstacle" if it exists
-};
-const size_t obstacleTopLength = sizeof(obstacleTop) / sizeof(obstacleTop[0]);
-
-size_t currentPathSegment = 0;
-void resetPathProgress() {
-    currentPathSegment = 0;
-}
-
-// ============================================================================
 // MAIN FUNCTIONS
 // ============================================================================
 
@@ -700,7 +748,7 @@ enum PathState { START1, MOVE, TOPL, TOPL2,
 
     TOP2, TOP22, TOP222, TOP2222,
 
-    CANDLE1, CANDLE2, CANDLE3, CANDLE4,
+    CANDLE1, CANDLE2, CANDLE3, CANDLE3F, CANDLE4,
 
     TOP3, TOP4, 
     TOP44,
@@ -714,6 +762,8 @@ enum PathState { START1, MOVE, TOPL, TOPL2,
     CHECK_OBSTACLE_TOP3F, 
     CHECK_OBSTACLE_TOP3FF,
     CHECK_OBSTACLE_TOP3FFF,
+
+
 
     FORWARD_SECOND_ROW,
     MOVE_TO_SECOND_ROW_TOP,
@@ -733,7 +783,7 @@ enum PathState { START1, MOVE, TOPL, TOPL2,
     GO_UNDER_LIMBO,
     GO_TO_LIMBO_ROTATE,
 
-    BOTTOM1, BOTTOM2, BOTTOM3 };
+    BOTTOM1, BOTTOM2, BOTTOM3, BOTTOM4, BOTTOM5, BOTTOM6,BOTTOM7,BOTTOM8,BOTTOM9,BOTTOM10,BOTTOM11,BOTTOM12 };
 PathState testPath = START1;
 
 enum TestPIDState { START_PID, SCAN_PID, MOVE1_PID, MOVE2_PID };
@@ -753,22 +803,25 @@ bool printed = false;
 void setup() {
     ENES_INIT = false;  // FIXED: was set to true before initWIFI()
     initWIFI();
-    Serial.begin(9600);
+    if (SERIAL_INIT) {
+        Serial.begin(9600);   
+    }
     printeln("Initializing...");
 
     initializeMotors();
     initSensors();
+    candleCount = 0;
 
     printeln("Ready!");
-    printeln("Wait 2 seconds...");
-    delay(2000);
+    printeln("Wait 1 second...");
+    delay(1000);
     printeln("GO");
 }
 
-void testMissionSensing() {
+void testFlameSensor() {
     unsigned long now = millis();
 
-    int sensorValue = digitalRead(THERMISTOR);
+    int sensorValue = digitalRead(THERMISTOR_PIN);
     if (sensorValue == HIGH) {
         printeln("No, Flame Not Detected");
     }else {
@@ -776,6 +829,14 @@ void testMissionSensing() {
     }
 
     delay(50);
+}
+
+void testLimitSwitches() {
+    bool leftPressed = (digitalRead(LIMIT_LEFT) == LOW);
+    bool rightPressed = (digitalRead(LIMIT_RIGHT) == LOW);
+
+    printeln("limit switch left: " + String(leftPressed));
+    printeln("limit switch right: " + String(rightPressed));
 }
 
 void testFan() {
@@ -788,19 +849,12 @@ void testFan() {
 }
 
 void testSideSensors() {
-
-    float right = readUltrasonic(usRight.trig, usRight.echo);
-    float left = readUltrasonic(usLeft.trig, usLeft.echo);
+    float right = readUltrasonic(ultrasonicRight.trig, ultrasonicRight.echo);
+    float left = readUltrasonic(ultrasonicLeft.trig, ultrasonicLeft.echo);
     printeln(String(left) + ", " + String(right));
-
-    
-
 }
 
-// void loop() {
-//     testSideSensors();
-// }
-
+bool isTopStartingPosition = true;
 void loop() {
     unsigned long now = millis();
 
@@ -818,13 +872,16 @@ void loop() {
         if (pose.theta > 0) {
             printeln("Detected OTV at TOP");
             printeln("Turning to face mission site");
+            isTopStartingPosition = true;
             testPath = TOPL;
         }else {
-            printeln("Detected OTV at BOTTOM. Doing nothing (path not created)");
+            printeln("Detected OTV at BOTTOM.");
+            printeln("Turning to face mission site");
+            isTopStartingPosition = false;
             testPath = BOTTOM1;
         }
     } else if (testPath == TOPL) {
-        // going to mission site by turning around
+        // going to mission site - turning around to face it
         mecanumDrive(0, 0, 0.27);
         delay(2900);
         turnOffMotors();
@@ -834,28 +891,29 @@ void loop() {
         delay(1000);
         testPath = TOPL2;
     } else if (testPath == TOPL2) {
-        // adjusting the turn angle
-        if (turnToAngleSmall(-1.5708, 0.25)) {
+        // going to mission site - fine tuning theta
+        if (turnToAngleSmall(-1.5708, 0.25, 220)) {
             printeln("moving to mission site");
             testPath = TOP2;
             delay(1000);
         }
     }else if (testPath == TOP2) {
-        // going to mission site
+        // going to mission site - moving forward to get closer to mission site
         if (moveLongToY(0.95, 0.24)) {
             delay(1000);
             testPath = TOP22; // do the mission stuff after this step
         }
     }else if (testPath == TOP22) {
-
-        if (moveStrafeToX(0.23, 0.3)) {
+        // going to mission site - strafing to align limit switches
+        if (moveStrafeToX(0.25, 0.3)) {
+            delay(1000);
             setTurnDirection(-1.5708);
             delay(1000);
             testPath = TOP222;
         }
 
     }else if (testPath == TOP222) {
-
+        // going to mission site - fine tuning theta after strafing
         if (turnToAngleSmall(-1.5708, 0.25)) {
             testPath = TOP2222;
             delay(1000);
@@ -864,61 +922,136 @@ void loop() {
     }
 
     else if (testPath == TOP2222) {
-
-        // aligning to right candle(s)
-        if (moveStrafeToRightSensor(31.5, 0.31)) {
-            testPath = CHECK_MISSION_SITE_DISTANCE;
-            delay(1000);
+        // mission site - aligning to right candle(s)
+        if (isTopStartingPosition == true) {
+            if (moveStrafeToRightSensor(34.5, 0.32)) {
+                testPath = CHECK_MISSION_SITE_DISTANCE;
+                setTurnDirection(-1.5708);
+                delay(1000);
+            }
+        }else {
+            if (moveStrafeToLeftSensor(45.0, 0.32)) {
+                testPath = CHECK_MISSION_SITE_DISTANCE;
+                setTurnDirection(1.5458);
+                delay(1000);
+            }
         }
-
     }
     
     else if (testPath == CHECK_MISSION_SITE_DISTANCE) {
-        mecanumDrive(0.38, 0, 0); // ram into mission site
-        delay(300);
-        turnOffMotors();
-        delay(1000); // 2 seconds buffer
-        printeln("moving backwards");
-        testPath = CANDLE1;
+        // mission site - ramming into mission site for limit switches
+        double dir = (isTopStartingPosition == true) ? -1.5708 : 1.5458;
+        if (turnToAngleSmall(dir, 0.25)) {
+            delay(1000);
+            mecanumDrive(0.27, 0, 0); 
+            delay(1000);
+            turnOffMotors();
+            delay(5000); // 5 second delay
+            int detection = checkLimitSwitches();
+            if (detection != -1) {
+                Enes100.mission(TOPOGRAPHY, detection);
+                printeln("TOPOLOGY: " + String(detection));
+            }else {
+                printeln("Invalid topology detected");
+            }
+            testPath = CANDLE1;
+        }
     }else if (testPath == CANDLE1) {
-
-        // updateFlameSensor(now);
-
-        // if (updateFlameSensor)
+        // mission site - successfully aligned to candle1
+        delay(1000);
+        bool flamePresent = updateFlameSensor();
+        if (flamePresent) {
+            candleCount++;
+            digitalWrite(FAN_PIN, HIGH);
+            delay(3000);
+            digitalWrite(FAN_PIN, LOW);
+            delay(1000);
+        }
+        printeln("Num Candles: " + String(candleCount));
         testPath = CANDLE2;
     }else if (testPath == CANDLE2) {
-
-        // updateFlameSensor(now);
-
+        // mission site - successfully aligned to candle2
         mecanumDrive(-0.25, 0, 0);
-        delay(750);
+        delay(700);
         turnOffMotors();
         delay(1000);
+        bool flamePresent = updateFlameSensor();
+        if (flamePresent) {
+            candleCount++;
+            digitalWrite(FAN_PIN, HIGH);
+            delay(3000);
+            digitalWrite(FAN_PIN, LOW);
+            delay(1000);
+        }
+        printeln("Num Candles: " + String(candleCount));
         testPath = CANDLE3;
     }else if (testPath == CANDLE3) {
-        // aligning to left candle(s)
-        if (moveStrafeToRightSensor(45.0, 0.31)) {
-            testPath = CANDLE4;
+        // mission site - aligning to candle3
+        if (isTopStartingPosition == true) {
+            if (moveStrafeToRightSensor(45.0, 0.32, 280)) {
+                delay(1000);
+                // setTurnDirection(-1.5708);
+                isTurningClockwise = false;
+                delay(1000);
+                testPath = CANDLE3F;
+            }
+        }else {
+            if (moveStrafeToLeftSensor(33.3, 0.32)) {
+                delay(1000);
+                // setTurnDirection(-1.5708);
+                isTurningClockwise = false;
+                delay(1000);
+                testPath = CANDLE3F;
+            }
+        }
+    }else if (testPath == CANDLE3F) {
+        // mission site - successfully aligned to candle3 with fine tuning theta
+        double goal = (isTopStartingPosition == true) ? -1.5708 : 1.5458;
+        if (turnToAngleSmall(goal, 0.25)) {
             delay(1000);
             mecanumDrive(0.26, 0, 0);
             delay(1100);
             turnOffMotors();
             delay(1000);
+            bool flamePresent = updateFlameSensor();
+            if (flamePresent) {
+                candleCount++;
+                digitalWrite(FAN_PIN, HIGH);
+                delay(3000);
+                digitalWrite(FAN_PIN, LOW);
+                delay(1000);
+            }
+            printeln("Num Candles: " + String(candleCount));
+            testPath = CANDLE4;
         }
-    }else if (testPath == CANDLE4) {
-
-        // updateFlameSensor(now);
-
+    }
+    
+    else if (testPath == CANDLE4) {
+        // mission site - successfully aligned to candle4
         mecanumDrive(-0.25, 0, 0);
-        delay(750);
+        delay(700);
         turnOffMotors();
         delay(1000);
-        testPath = TOP3;
+        bool flamePresent = updateFlameSensor();
+        if (flamePresent) {
+            candleCount++;
+            digitalWrite(FAN_PIN, HIGH);
+            delay(3000);
+            digitalWrite(FAN_PIN, LOW);
+            delay(1000);
+        }
+        printeln("Num Candles: " + String(candleCount));
+        Enes100.mission(NUM_CANDLES, candleCount);
+        if (isTopStartingPosition == true) {
+            testPath = TOP3;
+        }else {
+            testPath = BOTTOM6;
+        }
     }
 
     switch(testPath) {
         case TOP3:
-            // moving backwards
+            // going to obstacles - moving backwards and turning to face obstacles
             if (moveLongToY(1.5, 0.25)) {
                 // turn angle
                 mecanumDrive(0, 0, -0.25);
@@ -931,52 +1064,58 @@ void loop() {
                 delay(1000);
             }
         break;
-
         case TOP4:
-            if (turnToAngleSmall(0, 0.25)) {
+            // going to obstacles - fine tuning theta
+            if (turnToAngleSmall(0, 0.29)) {
                 testPath = TOP44;
                 delay(1000);
             }
         break;
-
         case TOP44:
-            // adjust coordinate back
+            // going to obstacles - adjusting Y coordinate
             if (moveStrafeToY(1.5, 0.35)) {
                 testPath = TOP444;
                 setTurnDirection(0);
                 delay(1000);
             }
         break;
-
         case TOP444:
-            // adjust coordinate back
+            // going to obstacles - fine tuning theta
             if (turnToAngleSmall(0, 0.25)) {
                 testPath = TOP5;
                 delay(1000);
             }
         break;
-
         case TOP5:
-            if (moveLongToX(0.58, 0.25)) {
-                obstaclePauseActive = false;
-                testPath = CHECK_OBSTACLE_TOP1;
-                delay(1000);
+            if (isTopStartingPosition == true) {
+                // going to obstacles - moving to first obstacle
+                if (moveLongToX(0.65, 0.25)) {
+                    isObstaclePauseActive = false;
+                    testPath = CHECK_OBSTACLE_TOP1;
+                    delay(1000);
+                }
+            }else {
+                if (moveLongToX(0.65, 0.25)) {
+                    isObstaclePauseActive = false;
+                    testPath = CHECK_OBSTACLE_TOP1;
+                    delay(1000);
+                }
             }
         break;
 
         case CHECK_OBSTACLE_TOP1:
-            if (!obstaclePauseActive) {
-                obstaclePauseActive = true;
-                obstaclePauseStart = now;
+            if (!isObstaclePauseActive) {
+                isObstaclePauseActive = true;
+                obstaclePauseStartTime = now;
                 printeln("Pausing to check for obstacles...");
-            } else if (now - obstaclePauseStart >= OBSTACLE_PAUSE_MS) {
-                float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLES, OBSTACLE_SAMPLE_DELAY_MS);
-                obstaclePauseActive = false;
+            } else if (now - obstaclePauseStartTime >= OBSTACLE_PAUSE_DURATION) {
+                float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLE_COUNT, OBSTACLE_SAMPLE_DELAY);
+                isObstaclePauseActive = false;
                 if (avgFront < 0) {
                     printeln("Front sensor readings invalid; assuming clear path");
                     testPath = FORWARD_SECOND_ROW;
                     delay(1000);
-                } else if (avgFront < FRONT_THRESH) {
+                } else if (avgFront < OBSTACLE_FRONT_THRESHOLD) {
                     printeln("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = CHECK_OBSTACLE_TOP2F;
                     delay(1000);
@@ -990,7 +1129,7 @@ void loop() {
 
         case CHECK_OBSTACLE_TOP2F:
             if (moveStrafeToY(1.0, 0.35)) {
-                obstaclePauseActive = false;
+                isObstaclePauseActive = false;
                 testPath = CHECK_OBSTACLE_TOP2FF;
                 delay(1000);
                 setTurnDirection(0);
@@ -1007,25 +1146,25 @@ void loop() {
 
         case CHECK_OBSTACLE_TOP2FFF:
             // adjusting due to strafe drift
-            if (moveLongToX(0.62, 0.24)) {
+            if (moveLongToX(0.64, 0.24)) {
                 testPath = CHECK_OBSTACLE_TOP2;
-                obstaclePauseActive = false;
+                isObstaclePauseActive = false;
             }
         break;
 
         case CHECK_OBSTACLE_TOP2:
-            if (!obstaclePauseActive) {
-                obstaclePauseActive = true;
-                obstaclePauseStart = now;
+            if (!isObstaclePauseActive) {
+                isObstaclePauseActive = true;
+                obstaclePauseStartTime = now;
                 printeln("Pausing to check for obstacles...");
-            } else if (now - obstaclePauseStart >= OBSTACLE_PAUSE_MS) {
-                float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLES, OBSTACLE_SAMPLE_DELAY_MS);
-                obstaclePauseActive = false;
+            } else if (now - obstaclePauseStartTime >= OBSTACLE_PAUSE_DURATION) {
+                float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLE_COUNT, OBSTACLE_SAMPLE_DELAY);
+                isObstaclePauseActive = false;
                 if (avgFront < 0) {
                     printeln("Front sensor readings invalid; assuming clear path");
                     testPath = FORWARD_SECOND_ROW;
                     delay(1000);
-                } else if (avgFront < FRONT_THRESH) {
+                } else if (avgFront < OBSTACLE_FRONT_THRESHOLD) {
                     printeln("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = CHECK_OBSTACLE_TOP3F;
                     delay(1000);
@@ -1038,8 +1177,8 @@ void loop() {
         break;
 
         case CHECK_OBSTACLE_TOP3F:
-            if (moveStrafeToY(0.5, 0.35)) {
-                obstaclePauseActive = false;
+            if (moveStrafeToY(0.5, 0.41)) {
+                isObstaclePauseActive = false;
                 testPath = CHECK_OBSTACLE_TOP3FF;
                 setTurnDirection(0);
                 delay(1000);
@@ -1048,7 +1187,7 @@ void loop() {
 
         case CHECK_OBSTACLE_TOP3FF:
             if (turnToAngleSmall(0, 0.25)) {
-                obstaclePauseActive = false;
+                isObstaclePauseActive = false;
                 testPath = CHECK_OBSTACLE_TOP3FFF;
                 delay(1000);
             }
@@ -1081,7 +1220,7 @@ void loop() {
 
         case FORWARD_SECOND_ROW:
             // go past the first row of obstacles
-            if (moveLongToX(1.45, 0.25)) {
+            if (moveLongToX(1.51, 0.25)) {
                 testPath = MOVE_TO_SECOND_ROW_TOP;
                 delay(1000);
             }
@@ -1107,7 +1246,7 @@ void loop() {
         case MOVE_TO_SECOND_ROW_TOP_ADJUST:
             // go to the top of the second row
             if (moveLongToX(1.57, 0.25)) {
-                obstaclePauseActive = false;
+                isObstaclePauseActive = false;
                 testPath = SECOND_ROW_TOP;
                 delay(1000);
             }
@@ -1115,18 +1254,18 @@ void loop() {
 
         case SECOND_ROW_TOP:
             // check for obstacles
-            if (!obstaclePauseActive) {
-                obstaclePauseActive = true;
-                obstaclePauseStart = now;
+            if (!isObstaclePauseActive) {
+                isObstaclePauseActive = true;
+                obstaclePauseStartTime = now;
                 printeln("Pausing to check for obstacles...");
-            } else if (now - obstaclePauseStart >= OBSTACLE_PAUSE_MS) {
-                float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLES, OBSTACLE_SAMPLE_DELAY_MS);
-                obstaclePauseActive = false;
+            } else if (now - obstaclePauseStartTime >= OBSTACLE_PAUSE_DURATION) {
+                float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLE_COUNT, OBSTACLE_SAMPLE_DELAY);
+                isObstaclePauseActive = false;
                 if (avgFront < 0) {
                     printeln("Front sensor readings invalid; assuming clear path");
                     testPath = FORWARD_THIRD_ROW;
                     delay(1000);
-                } else if (avgFront < FRONT_THRESH) {
+                } else if (avgFront < OBSTACLE_FRONT_THRESHOLD) {
                     printeln("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = SECOND_ROW_MIDDLEF;
                     delay(1000);
@@ -1157,8 +1296,8 @@ void loop() {
 
         case SECOND_ROW_MIDDLEFFF:
             // strafing to the second row to detect the middle obstacle
-            if (moveLongToX(1.57, 0.24)) {
-                obstaclePauseActive = false;
+            if (moveLongToX(1.64, 0.24)) {
+                isObstaclePauseActive = false;
                 testPath = SECOND_ROW_MIDDLE;
                 delay(1000);
             }
@@ -1166,18 +1305,18 @@ void loop() {
 
         case SECOND_ROW_MIDDLE:
             // check for obstacles
-            if (!obstaclePauseActive) {
-                obstaclePauseActive = true;
-                obstaclePauseStart = now;
+            if (!isObstaclePauseActive) {
+                isObstaclePauseActive = true;
+                obstaclePauseStartTime = now;
                 printeln("Pausing to check for obstacles...");
-            } else if (now - obstaclePauseStart >= OBSTACLE_PAUSE_MS) {
-                float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLES, OBSTACLE_SAMPLE_DELAY_MS);
-                obstaclePauseActive = false;
+            } else if (now - obstaclePauseStartTime >= OBSTACLE_PAUSE_DURATION) {
+                float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLE_COUNT, OBSTACLE_SAMPLE_DELAY);
+                isObstaclePauseActive = false;
                 if (avgFront < 0) {
                     printeln("Front sensor readings invalid; assuming clear path");
                     testPath = FORWARD_THIRD_ROW;
                     delay(1000);
-                } else if (avgFront < FRONT_THRESH) {
+                } else if (avgFront < OBSTACLE_FRONT_THRESHOLD) {
                     printeln("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = SECOND_ROW_BOTTOMF;
                     delay(1000);
@@ -1201,7 +1340,7 @@ void loop() {
         case SECOND_ROW_BOTTOMFF:
             // strafing to the third row
             if (turnToAngleSmall(0, 0.25)) {
-                obstaclePauseActive = false;
+                isObstaclePauseActive = false;
                 testPath = FORWARD_THIRD_ROW;
                 delay(1000);
             }
@@ -1216,7 +1355,7 @@ void loop() {
 
         case GO_TO_LIMBO:
             // strafing to the limbo area
-            if (moveStrafeToY(1.55, 0.35)) {
+            if (moveStrafeToY(1.54, 0.35)) {
                 testPath = GO_TO_LIMBO_ROTATE;
                 setTurnDirection(0);
                 delay(1000);
@@ -1239,11 +1378,78 @@ void loop() {
         break;
 
         case BOTTOM1:
+            // going to mission site - turning around to face it
+            mecanumDrive(0, 0, 0.27);
+            delay(2900);
+            turnOffMotors();
+            delay(1000);
+            printeln("turning at smaller speed");
+            setTurnDirection(1.5708);
+            delay(1000);
+            testPath = BOTTOM2;
         break;
         case BOTTOM2:
+            // going to mission site - fine tuning theta
+            if (turnToAngleSmall(1.5708, 0.25, 220)) {
+                printeln("moving to mission site");
+                testPath = BOTTOM3;
+                delay(1000);
+            }
         break;
-        default:
-            // printeln("DEBUG: Unknown testPath value: " + String(testPath));
+        case BOTTOM3:
+            // going to mission site - moving forward to get closer to mission site
+            if (moveLongToY(1.01, 0.24)) {
+                delay(1000);
+                testPath = BOTTOM4;
+            }
+        break;
+        case BOTTOM4:
+            // going to mission site - strafing to align limit switches
+            if (moveStrafeToX(0.32, 0.3)) {
+                delay(1000);
+                setTurnDirection(1.5708);
+                delay(1000);
+                testPath = BOTTOM5;
+            }
+        break;
+        case BOTTOM5:
+            // going to mission site - fine tuning theta after strafing
+            if (turnToAngleSmall(1.5708, 0.25)) {
+                testPath = TOP2222;
+                delay(1000);
+            }
+        break;
+        case BOTTOM6:
+            // going to obstacles - moving backwards and turning to face obstacles
+            if (moveLongToY(1.0, 0.25)) {
+                // turn angle
+                mecanumDrive(0, 0, 0.25);
+                delay(1300);
+                turnOffMotors();
+                delay(1000);
+                printeln("turning to face obstacles");
+                testPath = BOTTOM7;
+                setTurnDirection(0);
+                delay(1000);
+            }
+        break;
+        case BOTTOM7:
+            // going to obstacles - fine tuning theta
+            if (turnToAngleSmall(0, 0.29)) {
+                testPath = BOTTOM8;
+                delay(1000);
+            }
+        break;
+        case BOTTOM8:
+            // going to obstacles - x value
+            if (moveLongToX(0.54, 0.27)) {
+                testPath = TOP44;
+                delay(1000);
+            }
+        break;
+        case BOTTOM9:
+        break;
+        case BOTTOM10:
         break;
     }
 }
