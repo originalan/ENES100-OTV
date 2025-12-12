@@ -20,10 +20,8 @@
 #include "Enes100.h"
 
 // ============================================================================
-// PIN DEFINITIONS
+// HARDWARE PIN DEFINITIONS
 // ============================================================================
-
-const int ROOM_NUMBER = 1120; // 1120
 
 // Motor pins - Front Right (FR)
 const uint8_t MOTOR_FR_I1 = 22;
@@ -64,51 +62,139 @@ const uint8_t FAN_PIN = 12;
 // WiFi module pins
 const uint8_t WIFI_TX = A8;
 const uint8_t WIFI_RX = A9;
+
+// ============================================================================
+// SYSTEM CONFIGURATION CONSTANTS
+// ============================================================================
+
+// Robot identification for ENES100 communication
+const int ROOM_NUMBER = 1116;
 const uint8_t ARUCO_MARKER_ID = 67;
 
+// Array sizes and system capacities
+const uint8_t MOTOR_COUNT = 4;              // Number of motors in mecanum drive system
+const uint8_t PATH_STEPS = 5;               // Number of steps in test path sequence
+
 // ============================================================================
-// CONSTANTS
+// NAVIGATION CONSTANTS
 // ============================================================================
 
-// Motor identifiers and directions
-enum MotorID { FR = 1, FL = 2, BR = 3, BL = 4 };
-enum MotorDirection { FORWARD = 1, BACKWARD = 2, OFF = 3 };
+// Position and angle thresholds for movement completion
+const float POSITION_THRESHOLD = 0.06f;        // meters (~6 cm) - how close to target before stopping
+const float ANGLE_THRESHOLD = 0.09f;           // radians (~5 degrees) - angular tolerance for turns
 
-// Navigation thresholds
-const float OBSTACLE_FRONT_THRESHOLD = 33.0f;  // cm
-const float OBSTACLE_SIDE_THRESHOLD = 15.0f;   // cm
-const double POSITION_THRESHOLD = 0.06;        // meters (~6 cm)
-const double ANGLE_THRESHOLD = 0.09;           // radians (~5 degrees)
+// Maximum allowable speeds for safety
+const float MAX_LINEAR_SPEED = 0.5f;           // normalized speed (0.0-1.0)
+const float MAX_ROTATIONAL_SPEED = 0.5f;       // normalized rotational speed (0.0-1.0)
 
-// Timing constants
-const double HOLD_TIME = 1000.0;               // ms
-const unsigned long POSE_TIMEOUT = 250;        // ms
-const unsigned long OBSTACLE_PAUSE_DURATION = 1000;  // ms
-const unsigned long OBSTACLE_SAMPLE_DELAY = 0; // ms
+// ============================================================================
+// SENSOR CONSTANTS
+// ============================================================================
 
-// Speed limits
-const double MAX_LINEAR_SPEED = 0.5;
-const double MAX_ROTATIONAL_SPEED = 0.5;
+// Ultrasonic sensor distance thresholds for obstacle detection
+const float OBSTACLE_FRONT_THRESHOLD = 33.0f;  // cm - front obstacle detection distance
+const float OBSTACLE_SIDE_THRESHOLD = 15.0f;   // cm - side obstacle detection distance
 
-// Obstacle detection parameters
-const uint8_t OBSTACLE_SAMPLE_COUNT = 8;
+// Sensor alignment thresholds for mission site positioning
+const float SENSOR_DISTANCE_THRESHOLD = 1.0f;     // cm - coarse alignment tolerance
+const float SENSOR_DISTANCE_THRESHOLD_FINE = 1.5f; // cm - fine alignment tolerance
 
-// Movement timing constants
-const unsigned long STRAFE_DELAY = 250;          // ms
-const unsigned long TURN_DELAY = 800;            // ms
-const unsigned long GENERAL_DELAY = 1000;        // ms
+// Sensor sampling configuration
+const uint8_t OBSTACLE_SAMPLE_COUNT = 8;       // samples for reliable obstacle detection
+const uint8_t DEFAULT_SENSOR_SAMPLES = 5;      // default samples for distance averaging
+const unsigned long OBSTACLE_SAMPLE_DELAY = 0; // ms between obstacle detection samples
+const uint8_t DEFAULT_SAMPLE_DELAY_MS = 0;     // ms between regular distance samples
+
+// Sensor error return values
+const float SENSOR_ERROR_DISTANCE = -1.0f;     // returned when sensor reading fails
+
+// ============================================================================
+// TIMING CONSTANTS
+// ============================================================================
+
+// Communication and pose timeouts
+const unsigned long POSE_TIMEOUT = 250;        // ms - how long to keep old pose when marker lost
+
+// Movement timing delays (to allow motors to respond and stabilize)
+const unsigned long STRAFE_DELAY = 250;        // ms - delay after strafe movements
+const unsigned long TURN_DELAY = 800;          // ms - delay after turning movements
+const unsigned long GENERAL_DELAY = 1000;      // ms - general purpose delay
+
+// Obstacle detection timing
+const unsigned long OBSTACLE_PAUSE_DURATION = 500;  // ms - pause before checking obstacles
+
+// ============================================================================
+// MISSION CONSTANTS
+// ============================================================================
+
+// Mission site sensor alignment distances (cm from wall/edge)
+const float MISSION_SITE_DISTANCE_RIGHT_TOP = 34.5f;     // right sensor distance for TOP starting position
+const float MISSION_SITE_DISTANCE_LEFT_BOTTOM = 45.5f;   // left sensor distance for BOTTOM starting position
+const float MISSION_SITE_DISTANCE_CANDLE3_TOP = 45.0f;   // right sensor distance for candle 3 (TOP position)
+const float MISSION_SITE_DISTANCE_CANDLE3_BOTTOM = 33.3f; // left sensor distance for candle 3 (BOTTOM position)
+
+// Limit switch detection results
+const int NO_LIMIT_SWITCH_DETECTED = -1;  // returned when no limit switches are pressed
+
+// ============================================================================
+// ENUMERATIONS
+// ============================================================================
+
+// Motor identifiers for the four mecanum drive motors
+enum MotorID {
+    FR = 1,  // Front Right motor
+    FL = 2,  // Front Left motor
+    BR = 3,  // Back Right motor
+    BL = 4   // Back Left motor
+};
+
+// Motor rotation directions
+enum MotorDirection {
+    FORWARD = 1,   // Clockwise rotation
+    BACKWARD = 2,  // Counter-clockwise rotation
+    OFF = 3        // Motor stopped
+};
+
+enum PathState { START1, MOVE, TOPL, TOPL2,
+    CHECK_MISSION_SITE_DISTANCE,
+    TOP2, TOP22, TOP222, TOP2222,
+    CANDLE1, CANDLE2, CANDLE3, CANDLE3F, CANDLE4,
+    TOP3, TOP4, 
+    TOP44,
+    TOP444,
+    TOP5, TOP6, 
+    CHECK_OBSTACLE_TOP1,
+    CHECK_OBSTACLE_TOP2F, 
+    CHECK_OBSTACLE_TOP2FFF,
+    CHECK_OBSTACLE_TOP2FF,
+    CHECK_OBSTACLE_TOP2, 
+    CHECK_OBSTACLE_TOP3F, 
+    CHECK_OBSTACLE_TOP3FF,
+    CHECK_OBSTACLE_TOP3FFF,
+    FORWARD_SECOND_ROW,
+    MOVE_TO_SECOND_ROW_TOP,
+    MOVE_TO_SECOND_ROW_TOP_HALF,
+    MOVE_TO_SECOND_ROW_TOP_HALF_R,
+    MOVE_TO_SECOND_ROW_TOP_ROTATE,
+    MOVE_TO_SECOND_ROW_TOP_ADJUST,
+    SECOND_ROW_TOP,
+    SECOND_ROW_MIDDLEFF,
+    SECOND_ROW_MIDDLEF,
+    SECOND_ROW_MIDDLE,
+    SECOND_ROW_BOTTOMF,
+    SECOND_ROW_BOTTOMFF,
+    SECOND_ROW_MIDDLEFFF,
+    FORWARD_THIRD_ROW,
+    GO_TO_LIMBO,
+    GO_UNDER_LIMBO,
+    GO_TO_LIMBO_ROTATE,
+    BOTTOM1, BOTTOM2, BOTTOM3, BOTTOM4, BOTTOM5, BOTTOM6,BOTTOM7,BOTTOM8 };
+
+PathState testPath = START1;
 
 // ============================================================================
 // STRUCTURES
 // ============================================================================
-
-struct TimedDrive {
-    double vx;
-    double vy;
-    double vr;
-    unsigned long duration;
-    bool done;
-};
 
 struct Ultrasonic {
     uint8_t trig;
@@ -124,39 +210,44 @@ struct Pose {
 };
 
 struct PathSegment {
-    double x;
-    double y;
-    double theta;
+    float x;
+    float y;
+    float theta;
 };
 
 // ============================================================================
 // GLOBAL VARIABLES
 // ============================================================================
 
-bool ENES_INIT = false;
-bool SERIAL_INIT = true;
-Pose lastPose = {0, 0, 0, 0};
-bool poseValid = false;
+bool ENES_INIT;
+const bool SERIAL_INIT = true;
+Pose lastPose;
+bool poseValid;
+bool isTopStartingPosition;
 
 // Ultrasonic sensor instances
-Ultrasonic ultrasonicFront = {US_FRONT_TRIG, US_FRONT_ECHO, -1.0f, 0};
-Ultrasonic ultrasonicRight = {US_RIGHT_TRIG, US_RIGHT_ECHO, -1.0f, 0};
-Ultrasonic ultrasonicLeft = {US_LEFT_TRIG, US_LEFT_ECHO, -1.0f, 0};
+Ultrasonic ultrasonicFront;
+Ultrasonic ultrasonicRight;
+Ultrasonic ultrasonicLeft;
 
 // Timing and state variables
-unsigned long lastTriggerTime = 0;
-unsigned long driveUntil = 0;
-TimedDrive currentTimedDrive = {0, 0, 0, 0, true};
-unsigned long obstaclePauseStartTime = 0;
-bool isObstaclePauseActive = false;
+// obstaclePauseStartTime and isObstaclePauseActive moved to local static in loop()
 
 // Mission state
-int candleCount = 0;
+int candleCount;
 
 // ============================================================================
 // INITIALIZATION FUNCTIONS
 // ============================================================================
 
+/**
+ * @brief Initialize all motor control pins and set motors to stopped state
+ *
+ * Configures all motor driver pins as outputs and ensures all motors start
+ * in the OFF state to prevent unintended movement during startup.
+ *
+ * @return void
+ */
 void initializeMotors() {
     // Set all motor pins as outputs
     pinMode(MOTOR_FR_I1, OUTPUT);
@@ -187,6 +278,14 @@ void initializeMotors() {
     analogWrite(MOTOR_FL_ENB, 0);
 }
 
+/**
+ * @brief Initialize all sensor pins and set initial states
+ *
+ * Configures ultrasonic sensor trigger/echo pins, limit switch pins with
+ * pull-up resistors, flame sensor pin, and fan control pin. Sets fan to OFF state.
+ *
+ * @return void
+ */
 void initSensors() {
     // Ultrasonic sensors
     pinMode(US_FRONT_TRIG, OUTPUT);
@@ -206,6 +305,15 @@ void initSensors() {
     digitalWrite(FAN_PIN, LOW);
 }
 
+/**
+ * @brief Initialize WiFi communication with ENES100 system
+ *
+ * Establishes connection to the ENES100 communication network using the
+ * specified team name, mission type, ArUco marker ID, room number, and
+ * serial communication pins. Includes startup delay for stable initialization.
+ *
+ * @return void
+ */
 void initWIFI() {
     delay(1000);
     Enes100.begin("Smoke Signal", FIRE, ARUCO_MARKER_ID, ROOM_NUMBER, WIFI_TX, WIFI_RX);
@@ -213,18 +321,30 @@ void initWIFI() {
 }
 
 // ============================================================================
-// POSE/NAVIGATION FUNCTIONS
+// VISION AND LOCALIZATION FUNCTIONS
 // ============================================================================
 
+/**
+ * @brief Get current robot pose from ArUco marker detection
+ *
+ * Retrieves the robot's position and orientation from the ENES100 vision system.
+ * If marker is visible, returns fresh pose data. If not visible, returns the
+ * last known pose if it's within the timeout window, otherwise marks pose as invalid.
+ *
+ * @return Pose structure containing x, y, theta coordinates and timestamp
+ */
 Pose getArucoMarkerPose() {
     Pose pose;
     if (Enes100.isVisible()) {
+        // ArUco marker is visible - get fresh pose data from vision system
         pose = {Enes100.getX(), Enes100.getY(), Enes100.getTheta(), millis()};
-        lastPose = pose;
+        lastPose = pose;  // Cache this pose for when marker is lost
         poseValid = true;
     } else {
+        // Marker not visible - use cached pose if it's still recent
         pose = lastPose;
         unsigned long age = millis() - lastPose.timestamp;
+        // Mark pose as invalid if it's older than POSE_TIMEOUT (marker lost too long)
         poseValid = (age < POSE_TIMEOUT);
     }
     return pose;
@@ -234,31 +354,54 @@ Pose getArucoMarkerPose() {
 // ULTRASONIC SENSOR FUNCTIONS
 // ============================================================================
 
+/**
+ * @brief Read distance from ultrasonic sensor in centimeters
+ *
+ * Sends ultrasonic pulse and measures echo return time to calculate distance.
+ * Uses standard HC-SR04 timing protocol with 10µs trigger pulse and timeout
+ * at 35ms (~6m max range).
+ *
+ * @param trig Trigger pin number for the ultrasonic sensor
+ * @param echo Echo pin number for the ultrasonic sensor
+ * @return Distance in centimeters, or SENSOR_ERROR_DISTANCE (-1.0f) if timeout
+ */
 float readUltrasonic(uint8_t trig, uint8_t echo) {
-    // Ensure trigger starts LOW
+    // HC-SR04 ultrasonic sensor timing protocol:
+    // 1. Ensure trigger pin starts LOW (clean state)
     digitalWrite(trig, LOW);
     delayMicroseconds(2);
 
-    // 10µs HIGH pulse to trigger
+    // 2. Send 10µs HIGH pulse on trigger to initiate measurement
     digitalWrite(trig, HIGH);
     delayMicroseconds(10);
     digitalWrite(trig, LOW);
 
-    // Wait for echo (timeout 35ms = ~6m max range)
-    long duration = pulseIn(echo, HIGH, 35000);
+    // 3. Measure echo pulse duration (time for sound to travel to object and back)
+    // Timeout after 35ms (~6m max range at speed of sound)
+    long duration = pulseIn(echo, HIGH, 35000);  // Returns microseconds
 
-    if (duration == 0) return -1.0f;
+    if (duration == 0) return SENSOR_ERROR_DISTANCE;  // Timeout = no valid reading
 
-    // Convert to distance in cm (speed of sound ≈ 0.0343 cm/µs)
+    // 4. Convert echo duration to distance:
+    // - Speed of sound in air ≈ 343 m/s = 0.0343 cm/µs
+    // - Divide by 2 because sound travels to object and back (round trip)
+    // - Formula: distance = (duration * speed_of_sound) / 2
     return (duration * 0.0343f) / 2.0f;
 }
 
-float getFrontDistance() { return ultrasonicFront.distance; }
-float getLeftDistance() { return ultrasonicLeft.distance; }
-float getRightDistance() { return ultrasonicRight.distance; }
-
+/**
+ * @brief Get average distance reading from front ultrasonic sensor
+ *
+ * Takes multiple distance measurements from the front sensor and returns
+ * the average to reduce noise and improve reliability. Invalid readings
+ * (timeouts) are filtered out.
+ *
+ * @param samples Number of samples to average (must be > 0)
+ * @param sampleDelayMs Delay between samples in milliseconds
+ * @return Average distance in cm, or SENSOR_ERROR_DISTANCE if no valid readings
+ */
 float getFrontDistanceAverage(uint8_t samples, unsigned long sampleDelayMs) {
-    if (samples == 0) return -1.0f;
+    if (samples == 0) return SENSOR_ERROR_DISTANCE;
 
     float sum = 0.0f;
     uint8_t validSamples = 0;
@@ -272,12 +415,12 @@ float getFrontDistanceAverage(uint8_t samples, unsigned long sampleDelayMs) {
             delay(sampleDelayMs);
         }
     }
-    if (validSamples == 0) return -1.0f;
+    if (validSamples == 0) return SENSOR_ERROR_DISTANCE;
     return sum / static_cast<float>(validSamples);
 }
 
 float getRightDistanceAverage(uint8_t samples, unsigned long sampleDelayMs) {
-    if (samples == 0) return -1.0f;
+    if (samples == 0) return SENSOR_ERROR_DISTANCE;
 
     float sum = 0.0f;
     uint8_t validSamples = 0;
@@ -291,12 +434,12 @@ float getRightDistanceAverage(uint8_t samples, unsigned long sampleDelayMs) {
             delay(sampleDelayMs);
         }
     }
-    if (validSamples == 0) return -1.0f;
+    if (validSamples == 0) return SENSOR_ERROR_DISTANCE;
     return sum / static_cast<float>(validSamples);
 }
 
 float getLeftDistanceAverage(uint8_t samples, unsigned long sampleDelayMs) {
-    if (samples == 0) return -1.0f;
+    if (samples == 0) return SENSOR_ERROR_DISTANCE;
 
     float sum = 0.0f;
     uint8_t validSamples = 0;
@@ -310,7 +453,7 @@ float getLeftDistanceAverage(uint8_t samples, unsigned long sampleDelayMs) {
             delay(sampleDelayMs);
         }
     }
-    if (validSamples == 0) return -1.0f;
+    if (validSamples == 0) return SENSOR_ERROR_DISTANCE;
     return sum / static_cast<float>(validSamples);
 }
 
@@ -318,7 +461,24 @@ float getLeftDistanceAverage(uint8_t samples, unsigned long sampleDelayMs) {
 // MOTOR CONTROL FUNCTIONS
 // ============================================================================
 
-void setMotorSpeed(MotorID motorNumber, double normalized) {
+/**
+ * @brief Set speed for individual mecanum wheel motor
+ *
+ * Controls a single motor in the mecanum drive system. Converts normalized
+ * speed (-1.0 to 1.0) to PWM duty cycle and sets appropriate direction pins.
+ * Invalid motor IDs are logged and ignored.
+ *
+ * @param motorNumber Motor identifier (FR, FL, BR, BL)
+ * @param normalized Normalized speed (-1.0 = full reverse, 0.0 = stop, 1.0 = full forward)
+ * @return void
+ */
+void setMotorSpeed(MotorID motorNumber, float normalized) {
+    // Validate motor number
+    if (motorNumber < FR || motorNumber > BL) {
+        printlnToConsole("ERROR: Invalid motor number: " + String(motorNumber));
+        return;
+    }
+
     // Clamp to [-1, 1]
     normalized = constrain(normalized, -1.0, 1.0);
 
@@ -330,10 +490,12 @@ void setMotorSpeed(MotorID motorNumber, double normalized) {
         direction = BACKWARD;
     }
 
-    // Convert to PWM value (0-255)
+    // Convert normalized speed (-1.0 to 1.0) to PWM duty cycle (0-255)
+    // fabs() ensures we get positive PWM value regardless of direction
     uint8_t pwm = (uint8_t)(fabs(normalized) * 255.0);
 
-    // Set direction pins
+    // Each motor has 2 direction control pins (I1/I2) and 1 PWM enable pin (ENA/ENB)
+    // Direction pins control H-bridge logic for forward/reverse rotation
     uint8_t pin1, pin2, pwmPin;
     bool pin1State, pin2State;
 
@@ -382,14 +544,27 @@ void turnOffMotors() {
     setMotorSpeed(BL, 0);
 }
 
-void mecanumDrive(double vx, double vy, double vr) {
+/**
+ * @brief Control omnidirectional movement using mecanum wheel kinematics
+ *
+ * Converts velocity commands into individual wheel speeds for holonomic movement.
+ * Applies kinematic equations for mecanum wheels and normalizes speeds to prevent
+ * saturation. Supports simultaneous translation and rotation.
+ *
+ * @param vx Forward/backward velocity (-1.0 to 1.0)
+ * @param vy Left/right strafing velocity (-1.0 to 1.0)
+ * @param vr Rotational velocity (-1.0 to 1.0, positive = counter-clockwise)
+ * @return void
+ */
+void mecanumDrive(float vx, float vy, float vr) {
     // Mecanum wheel kinematics
     double fr = vx - vy - vr;
     double fl = vx + vy + vr;
     double br = vx + vy - vr;
     double bl = vx - vy + vr;
 
-    // Normalize if any wheel exceeds max speed
+    // Normalize speeds if any wheel would exceed ±1.0 to maintain requested velocity ratios
+    // This prevents motor saturation while preserving intended motion direction
     double maxVal = max(max(fabs(fl), fabs(fr)), max(fabs(bl), fabs(br)));
     if (maxVal > 1.0) {
         fl /= maxVal;
@@ -405,16 +580,12 @@ void mecanumDrive(double vx, double vy, double vr) {
 }
 
 // ============================================================================
-// NAVIGATION FUNCTIONS (FIXED BUGS)
+// MOTION CONTROL AND NAVIGATION FUNCTIONS
 // ============================================================================
 
 // Turn direction: true = clockwise, false = counter-clockwise
 bool isTurningClockwise = false;
-void setTurnDirection(double thetaTarget) {
-    double error = thetaTarget - Enes100.getTheta();
-    isTurningClockwise = (error < 0);
-}
-bool turnToAngleSmall(double thetaTarget, double power) {
+bool turnToAngleSmall(float thetaTarget, float power) {
     Pose p = {Enes100.getX(), Enes100.getY(), Enes100.getTheta(), millis()};
     double error = (thetaTarget - p.theta);
     isTurningClockwise = (error < 0);
@@ -435,7 +606,7 @@ bool turnToAngleSmall(double thetaTarget, double power) {
     }
     return false;
 }
-bool turnToAngleSmall(double thetaTarget, double power, int delayMS) {
+bool turnToAngleSmall(float thetaTarget, float power, int delayMS) {
     Pose p = {Enes100.getX(), Enes100.getY(), Enes100.getTheta(), millis()};
     double error = (thetaTarget - p.theta);
     isTurningClockwise = (error < 0);
@@ -457,7 +628,7 @@ bool turnToAngleSmall(double thetaTarget, double power, int delayMS) {
     return false;
 }
 
-bool turnToAngle(double thetaTarget, double power, bool direction) {
+bool turnToAngle(float thetaTarget, float power, bool direction) {
     Pose p = getArucoMarkerPose();
     double error = (thetaTarget - p.theta);
 
@@ -480,7 +651,7 @@ bool turnToAngle(double thetaTarget, double power, bool direction) {
     return false;
 }
 
-bool moveLongToX(double targetX, double power) {
+bool moveLongToX(float targetX, float power) {
 
     Pose p = getArucoMarkerPose();
     power = constrain(power, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED);
@@ -507,7 +678,7 @@ bool moveLongToX(double targetX, double power) {
     
     return false; // still moving
 }
-bool moveLongToY(double targetY, double power) {
+bool moveLongToY(float targetY, float power) {
 
     Pose p = getArucoMarkerPose();
     power = constrain(power, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED);
@@ -534,7 +705,7 @@ bool moveLongToY(double targetY, double power) {
     
     return false; // still moving
 }
-bool moveStrafeToX(double targetX, double power) {
+bool moveStrafeToX(float targetX, float power) {
 
     Pose p = getArucoMarkerPose();
     power = constrain(power, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED);
@@ -561,16 +732,16 @@ bool moveStrafeToX(double targetX, double power) {
     
     return false; // still moving
 }
-bool moveStrafeToRightSensor(double targetDistanceRight, double power) {
+bool moveStrafeToRightSensor(float targetDistanceRight, float power) {
 
     Pose p = getArucoMarkerPose();
-    float right = getRightDistanceAverage(5, 0);
+    float right = getRightDistanceAverage(DEFAULT_SENSOR_SAMPLES, DEFAULT_SAMPLE_DELAY_MS);
     power = constrain(power, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED);
 
     double errorX = (right - targetDistanceRight);
     double distanceX = fabs(errorX);
 
-    if (distanceX < 1.0) {
+    if (distanceX < SENSOR_DISTANCE_THRESHOLD) {
         return true;
     }
 
@@ -590,16 +761,16 @@ bool moveStrafeToRightSensor(double targetDistanceRight, double power) {
     }
     return false; // still moving
 }
-bool moveStrafeToRightSensor(double targetDistanceRight, double power, int delayMS) {
+bool moveStrafeToRightSensor(float targetDistanceRight, float power, int delayMS) {
 
     Pose p = getArucoMarkerPose();
-    float right = getRightDistanceAverage(5, 0);
+    float right = getRightDistanceAverage(DEFAULT_SENSOR_SAMPLES, DEFAULT_SAMPLE_DELAY_MS);
     power = constrain(power, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED);
 
     double errorX = (right - targetDistanceRight);
     double distanceX = fabs(errorX);
 
-    if (distanceX < 1.5) {
+    if (distanceX < SENSOR_DISTANCE_THRESHOLD_FINE) {
         return true;
     }
 
@@ -619,16 +790,16 @@ bool moveStrafeToRightSensor(double targetDistanceRight, double power, int delay
     }
     return false; // still moving
 }
-bool moveStrafeToLeftSensor(double targetDistanceLeft, double power) {
+bool moveStrafeToLeftSensor(float targetDistanceLeft, float power) {
 
     Pose p = getArucoMarkerPose();
-    float left = getLeftDistanceAverage(5, 0);
+    float left = getLeftDistanceAverage(DEFAULT_SENSOR_SAMPLES, DEFAULT_SAMPLE_DELAY_MS);
     power = constrain(power, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED);
 
     double errorX = (left - targetDistanceLeft);
     double distanceX = fabs(errorX);
 
-    if (distanceX < 1.0) {
+    if (distanceX < SENSOR_DISTANCE_THRESHOLD) {
         return true;
     }
 
@@ -648,7 +819,7 @@ bool moveStrafeToLeftSensor(double targetDistanceLeft, double power) {
     }
     return false; // still moving
 }
-bool moveStrafeToY(double targetY, double power) {
+bool moveStrafeToY(float targetY, float power) {
 
     Pose p = getArucoMarkerPose();
     power = constrain(power, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED);
@@ -680,6 +851,18 @@ bool moveStrafeToY(double targetY, double power) {
 // SENSOR FUNCTIONS
 // ============================================================================
 
+/**
+ * @brief Check topography limit switches and return terrain type
+ *
+ * Reads both left and right limit switches to determine the terrain topology
+ * at the mission site. Returns specific codes for different terrain configurations:
+ * - TOP_A: Left switch only
+ * - TOP_B: Right switch only
+ * - TOP_C: Both switches
+ * - NO_LIMIT_SWITCH_DETECTED (-1): Neither switch
+ *
+ * @return Terrain topology code or NO_LIMIT_SWITCH_DETECTED
+ */
 int checkLimitSwitches() {
     bool leftPressed = (digitalRead(LIMIT_LEFT) == LOW);
     bool rightPressed = (digitalRead(LIMIT_RIGHT) == LOW);
@@ -690,6 +873,14 @@ int checkLimitSwitches() {
     return -1;
 }
 
+/**
+ * @brief Check if flame is currently detected by thermistor sensor
+ *
+ * Reads the digital thermistor input and returns true if flame is present.
+ * The sensor outputs LOW when flame is detected (heating effect on thermistor).
+ *
+ * @return true if flame detected, false otherwise
+ */
 bool updateFlameSensor() {
     int sensorValue = digitalRead(THERMISTOR_PIN);
 
@@ -701,7 +892,16 @@ bool updateFlameSensor() {
 // UTILITY FUNCTIONS
 // ============================================================================
 
-void printe(String msg) {
+/**
+ * @brief Print message to both ENES100 and serial console
+ *
+ * Outputs text to available communication channels for debugging and monitoring.
+ * Supports both ENES100 wireless communication and local serial output.
+ *
+ * @param msg Message to print (without newline)
+ * @return void
+ */
+void printToConsole(const String& msg) {
     if (ENES_INIT) {
         Enes100.print(msg);
     }
@@ -710,7 +910,16 @@ void printe(String msg) {
     }
 }
 
-void printeln(String msg) {
+/**
+ * @brief Print message with newline to both ENES100 and serial console
+ *
+ * Outputs text followed by newline to available communication channels.
+ * Supports both ENES100 wireless communication and local serial output.
+ *
+ * @param msg Message to print (with newline)
+ * @return void
+ */
+void printlnToConsole(const String& msg) {
     if (ENES_INIT) {
         Enes100.println(msg);
     }
@@ -719,103 +928,157 @@ void printeln(String msg) {
     }
 }
 
-void testEachMotor(unsigned long duration, double speed) {
-    MotorID motors[4] = {FR, FL, BR, BL};
-    String motorNames[4] = {"Front Right", "Front Left", "Back Right", "Back Left"};
+void testEachMotor(unsigned long duration, float speed) {
+    MotorID motors[MOTOR_COUNT] = {FR, FL, BR, BL};
+    String motorNames[MOTOR_COUNT] = {"Front Right", "Front Left", "Back Right", "Back Left"};
 
-    for (int i = 0; i < 4; i++) {
-        printeln("Testing " + motorNames[i] + " forward");
+    for (int i = 0; i < MOTOR_COUNT; i++) {
+        printlnToConsole("Testing " + motorNames[i] + " forward");
         setMotorSpeed(motors[i], speed);
         delay(duration);
         turnOffMotors();
         delay(500);
 
-        printeln("Testing " + motorNames[i] + " backward");
+        printlnToConsole("Testing " + motorNames[i] + " backward");
         setMotorSpeed(motors[i], -speed);
         delay(duration);
         turnOffMotors();
         delay(500);
     }
-    printeln("Motor test complete!");
+    printlnToConsole("Motor test complete!");
+}
+
+// ============================================================================
+// HIGH-LEVEL HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * @brief Extinguish a candle if flame is detected
+ *
+ * Checks for flame presence using the thermistor sensor and activates the fan
+ * to extinguish the candle if detected. Updates the global candle counter.
+ * This function encapsulates the complete candle extinguishing sequence.
+ *
+ * @return void
+ */
+void extinguishCandle() {
+    bool flamePresent = updateFlameSensor();
+    if (!flamePresent) {
+        return; // Early return if no flame detected
+    }
+
+    candleCount++;
+    digitalWrite(FAN_PIN, HIGH);
+    delay(3000);  // TODO: Make fan duration configurable via constant
+    digitalWrite(FAN_PIN, LOW);
+    delay(1000);
+    printlnToConsole("Num Candles: " + String(candleCount));
+}
+
+/**
+ * @brief Execute a motor movement with delay and optional stop
+ *
+ * Moves the robot using mecanum drive kinematics for the specified duration,
+ * then stops the motors. Optionally waits for an additional delay after stopping.
+ * This consolidates the common pattern of move-delay-stop sequences.
+ *
+ * @param vx Forward/backward velocity component (-1.0 to 1.0)
+ * @param vy Left/right strafing velocity component (-1.0 to 1.0)
+ * @param vr Rotational velocity component (-1.0 to 1.0)
+ * @param moveDelayMs Duration to move in milliseconds
+ * @param stopDelayMs Optional additional delay after stopping motors (default: 0)
+ * @return void
+ */
+void moveWithDelay(float vx, float vy, float vr, unsigned long moveDelayMs, unsigned long stopDelayMs = 0) {
+    mecanumDrive(vx, vy, vr);
+    delay(moveDelayMs);
+    turnOffMotors();
+    if (stopDelayMs > 0) {
+        delay(stopDelayMs);
+    }
+}
+
+/**
+ * @brief Check for obstacles and determine navigation path
+ *
+ * Implements a timed pause for reliable obstacle detection using ultrasonic sensors.
+ * Takes multiple readings and determines if the path ahead is clear or blocked.
+ * This function manages its own timing state across multiple calls.
+ *
+ * @param nextStateIfObstacle Reference to PathState that will be set if obstacle detected
+ * @param nextStateIfClear Reference to PathState that will be set if path is clear
+ * @return true if obstacle detected, false if clear or still checking
+ */
+bool checkForObstacles(PathState& nextStateIfObstacle, PathState& nextStateIfClear) {
+    static unsigned long obstaclePauseStartTime = 0;
+    static bool isObstaclePauseActive = false;
+    unsigned long now = millis();
+
+    if (!isObstaclePauseActive) {
+        isObstaclePauseActive = true;
+        obstaclePauseStartTime = now;
+        printlnToConsole("Pausing to check for obstacles...");
+        return false; // Still checking
+    }
+
+    if (now - obstaclePauseStartTime >= OBSTACLE_PAUSE_DURATION) {
+        float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLE_COUNT, OBSTACLE_SAMPLE_DELAY);
+        isObstaclePauseActive = false;
+
+        if (avgFront < 0) {
+            printlnToConsole("Front sensor readings invalid; assuming clear path");
+            nextStateIfClear = FORWARD_SECOND_ROW;
+            return false; // Clear path
+        } else if (avgFront < OBSTACLE_FRONT_THRESHOLD) {
+            printlnToConsole("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
+            return true; // Obstacle detected
+        } else {
+            printlnToConsole("No obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
+            nextStateIfClear = FORWARD_SECOND_ROW;
+            return false; // Clear path
+        }
+    }
+
+    return false; // Still checking
 }
 
 // ============================================================================
 // MAIN FUNCTIONS
 // ============================================================================
 
-enum PathState { START1, MOVE, TOPL, TOPL2,
-    CHECK_MISSION_SITE_DISTANCE,
-
-    TOP2, TOP22, TOP222, TOP2222,
-
-    CANDLE1, CANDLE2, CANDLE3, CANDLE3F, CANDLE4,
-
-    TOP3, TOP4, 
-    TOP44,
-    TOP444,
-    TOP5, TOP6, 
-    CHECK_OBSTACLE_TOP1,
-    CHECK_OBSTACLE_TOP2F, 
-    CHECK_OBSTACLE_TOP2FFF,
-    CHECK_OBSTACLE_TOP2FF,
-    CHECK_OBSTACLE_TOP2, 
-    CHECK_OBSTACLE_TOP3F, 
-    CHECK_OBSTACLE_TOP3FF,
-    CHECK_OBSTACLE_TOP3FFF,
-
-
-
-    FORWARD_SECOND_ROW,
-    MOVE_TO_SECOND_ROW_TOP,
-    MOVE_TO_SECOND_ROW_TOP_HALF,
-    MOVE_TO_SECOND_ROW_TOP_HALF_R,
-    MOVE_TO_SECOND_ROW_TOP_ROTATE,
-    MOVE_TO_SECOND_ROW_TOP_ADJUST,
-    SECOND_ROW_TOP,
-    SECOND_ROW_MIDDLEFF,
-    SECOND_ROW_MIDDLEF,
-    SECOND_ROW_MIDDLE,
-    SECOND_ROW_BOTTOMF,
-    SECOND_ROW_BOTTOMFF,
-    SECOND_ROW_MIDDLEFFF,
-    FORWARD_THIRD_ROW,
-    GO_TO_LIMBO,
-    GO_UNDER_LIMBO,
-    GO_TO_LIMBO_ROTATE,
-
-    BOTTOM1, BOTTOM2, BOTTOM3, BOTTOM4, BOTTOM5, BOTTOM6,BOTTOM7,BOTTOM8,BOTTOM9,BOTTOM10,BOTTOM11,BOTTOM12 };
-PathState testPath = START1;
-
-enum TestPIDState { START_PID, SCAN_PID, MOVE1_PID, MOVE2_PID };
-TestPIDState pidState = START_PID;
-
-TimedDrive path[] = {
-    {0.2, 0, 0, 2000, false},
-    {0, 0, 0.2, 2000, false},
-    {0.2, 0, 0, 2000, false},
-    {0, 0.2, 0, 2000, false},
-    {0, 0, 0, 2000, false}
-};
-const int numSteps = sizeof(path) / sizeof(path[0]);
-int currentStep = 0;
-bool printed = false;
-
+int FORWARD_SECOND_ROW_VALUE = 1.51; 
 void setup() {
-    ENES_INIT = false;  // FIXED: was set to true before initWIFI()
+    // Initialize global variables with clear default values
+    ENES_INIT = false;
+    lastPose = {0.0f, 0.0f, 0.0f, 0};
+    poseValid = false;
+
+    // Initialize ultrasonic sensor instances
+    ultrasonicFront = {US_FRONT_TRIG, US_FRONT_ECHO, -1.0f, 0};
+    ultrasonicRight = {US_RIGHT_TRIG, US_RIGHT_ECHO, -1.0f, 0};
+    ultrasonicLeft = {US_LEFT_TRIG, US_LEFT_ECHO, -1.0f, 0};
+
+    // Initialize timing and state variables
+    // obstaclePauseStartTime and isObstaclePauseActive initialized as static locals in loop()
+
+    // Initialize mission state
+    candleCount = 1;
+    testPath = START1;
+    isTopStartingPosition = true;
+
     initWIFI();
     if (SERIAL_INIT) {
-        Serial.begin(9600);   
+        Serial.begin(9600);
     }
-    printeln("Initializing...");
+    printlnToConsole("Initializing...");
 
     initializeMotors();
     initSensors();
-    candleCount = 0;
 
-    printeln("Ready!");
-    printeln("Wait 1 second...");
+    printlnToConsole("Ready!");
+    printlnToConsole("Wait 1 second...");
     delay(1000);
-    printeln("GO");
+    printlnToConsole("GO");
 }
 
 void testFlameSensor() {
@@ -823,11 +1086,12 @@ void testFlameSensor() {
 
     int sensorValue = digitalRead(THERMISTOR_PIN);
     if (sensorValue == HIGH) {
-        printeln("No, Flame Not Detected");
-    }else {
-        printeln("Yes, Flame Detected");
+        printlnToConsole("No, Flame Not Detected");
+        delay(50);
+        return;
     }
 
+    printlnToConsole("Yes, Flame Detected");
     delay(50);
 }
 
@@ -835,15 +1099,15 @@ void testLimitSwitches() {
     bool leftPressed = (digitalRead(LIMIT_LEFT) == LOW);
     bool rightPressed = (digitalRead(LIMIT_RIGHT) == LOW);
 
-    printeln("limit switch left: " + String(leftPressed));
-    printeln("limit switch right: " + String(rightPressed));
+    printlnToConsole("limit switch left: " + String(leftPressed));
+    printlnToConsole("limit switch right: " + String(rightPressed));
 }
 
 void testFan() {
-    printeln("FAN ON");
+    printlnToConsole("FAN ON");
     digitalWrite(FAN_PIN, HIGH);
     delay(3000);
-    printeln("FAN OFF");
+    printlnToConsole("FAN OFF");
     digitalWrite(FAN_PIN, LOW);
     delay(3000);
 }
@@ -851,49 +1115,46 @@ void testFan() {
 void testSideSensors() {
     float right = readUltrasonic(ultrasonicRight.trig, ultrasonicRight.echo);
     float left = readUltrasonic(ultrasonicLeft.trig, ultrasonicLeft.echo);
-    printeln(String(left) + ", " + String(right));
+    printlnToConsole(String(left) + ", " + String(right));
 }
 
-bool isTopStartingPosition = true;
 void loop() {
     unsigned long now = millis();
+    static bool printed = false;  // Local static variable for START1 state
+    static unsigned long obstaclePauseStartTime = 0;  // Local static for obstacle checking
+    static bool isObstaclePauseActive = false;  // Local static for obstacle checking
 
     if (testPath == START1) {
         if (!printed) {
-                printeln("Scanning for ArUco marker...");
+                printlnToConsole("Scanning for ArUco marker...");
                 printed = true;
             }
             if (Enes100.isVisible()) {
-                printeln("ArUco Marker Detected");
+                printlnToConsole("ArUco Marker Detected");
                 testPath = MOVE;
             }
     } else if (testPath == MOVE) {
         Pose pose = getArucoMarkerPose();
         if (pose.theta > 0) {
-            printeln("Detected OTV at TOP");
-            printeln("Turning to face mission site");
+            printlnToConsole("Detected OTV at TOP");
+            printlnToConsole("Turning to face mission site");
             isTopStartingPosition = true;
             testPath = TOPL;
         }else {
-            printeln("Detected OTV at BOTTOM.");
-            printeln("Turning to face mission site");
+            printlnToConsole("Detected OTV at BOTTOM.");
+            printlnToConsole("Turning to face mission site");
             isTopStartingPosition = false;
             testPath = BOTTOM1;
         }
     } else if (testPath == TOPL) {
         // going to mission site - turning around to face it
-        mecanumDrive(0, 0, 0.27);
-        delay(2900);
-        turnOffMotors();
-        delay(1000);
-        printeln("turning at smaller speed");
-        setTurnDirection(-1.5708);
-        delay(1000);
+        moveWithDelay(0, 0, 0.27, 2900, 1000);
+        printlnToConsole("turning at smaller speed");
         testPath = TOPL2;
     } else if (testPath == TOPL2) {
         // going to mission site - fine tuning theta
         if (turnToAngleSmall(-1.5708, 0.25, 220)) {
-            printeln("moving to mission site");
+            printlnToConsole("moving to mission site");
             testPath = TOP2;
             delay(1000);
         }
@@ -906,8 +1167,6 @@ void loop() {
     }else if (testPath == TOP22) {
         // going to mission site - strafing to align limit switches
         if (moveStrafeToX(0.25, 0.3)) {
-            delay(1000);
-            setTurnDirection(-1.5708);
             delay(1000);
             testPath = TOP222;
         }
@@ -924,15 +1183,13 @@ void loop() {
     else if (testPath == TOP2222) {
         // mission site - aligning to right candle(s)
         if (isTopStartingPosition == true) {
-            if (moveStrafeToRightSensor(34.5, 0.32)) {
+            if (moveStrafeToRightSensor(34.5f, 0.32f)) {
                 testPath = CHECK_MISSION_SITE_DISTANCE;
-                setTurnDirection(-1.5708);
                 delay(1000);
             }
         }else {
-            if (moveStrafeToLeftSensor(45.0, 0.32)) {
+            if (moveStrafeToLeftSensor(45.0f, 0.32f)) {
                 testPath = CHECK_MISSION_SITE_DISTANCE;
-                setTurnDirection(1.5458);
                 delay(1000);
             }
         }
@@ -943,63 +1200,41 @@ void loop() {
         double dir = (isTopStartingPosition == true) ? -1.5708 : 1.5458;
         if (turnToAngleSmall(dir, 0.25)) {
             delay(1000);
-            mecanumDrive(0.27, 0, 0); 
-            delay(1000);
-            turnOffMotors();
-            delay(5000); // 5 second delay
+            moveWithDelay(0.27, 0, 0, 1000, 1000); // 5 second delay
             int detection = checkLimitSwitches();
             if (detection != -1) {
                 Enes100.mission(TOPOGRAPHY, detection);
-                printeln("TOPOLOGY: " + String(detection));
+                if (detection == TOP_A) {
+                    printlnToConsole("TOPOLOGY: A");
+                }else if (detection == TOP_B) {
+                    printlnToConsole("TOPOLOGY: B");
+                }else {
+                    printlnToConsole("TOPOLOGY: C");
+                }
             }else {
-                printeln("Invalid topology detected");
+                printlnToConsole("Invalid topology detected");
             }
             testPath = CANDLE1;
         }
     }else if (testPath == CANDLE1) {
         // mission site - successfully aligned to candle1
         delay(1000);
-        bool flamePresent = updateFlameSensor();
-        if (flamePresent) {
-            candleCount++;
-            digitalWrite(FAN_PIN, HIGH);
-            delay(3000);
-            digitalWrite(FAN_PIN, LOW);
-            delay(1000);
-        }
-        printeln("Num Candles: " + String(candleCount));
+        extinguishCandle();
         testPath = CANDLE2;
     }else if (testPath == CANDLE2) {
         // mission site - successfully aligned to candle2
-        mecanumDrive(-0.25, 0, 0);
-        delay(700);
-        turnOffMotors();
-        delay(1000);
-        bool flamePresent = updateFlameSensor();
-        if (flamePresent) {
-            candleCount++;
-            digitalWrite(FAN_PIN, HIGH);
-            delay(3000);
-            digitalWrite(FAN_PIN, LOW);
-            delay(1000);
-        }
-        printeln("Num Candles: " + String(candleCount));
+        moveWithDelay(-0.25, 0, 0, 700, 1000);
+        extinguishCandle();
         testPath = CANDLE3;
     }else if (testPath == CANDLE3) {
         // mission site - aligning to candle3
         if (isTopStartingPosition == true) {
-            if (moveStrafeToRightSensor(45.0, 0.32, 280)) {
-                delay(1000);
-                // setTurnDirection(-1.5708);
-                isTurningClockwise = false;
+            if (moveStrafeToRightSensor(45.0f, 0.32f, 280)) {
                 delay(1000);
                 testPath = CANDLE3F;
             }
         }else {
-            if (moveStrafeToLeftSensor(33.3, 0.32)) {
-                delay(1000);
-                // setTurnDirection(-1.5708);
-                isTurningClockwise = false;
+            if (moveStrafeToLeftSensor(33.3f, 0.32f)) {
                 delay(1000);
                 testPath = CANDLE3F;
             }
@@ -1009,38 +1244,16 @@ void loop() {
         double goal = (isTopStartingPosition == true) ? -1.5708 : 1.5458;
         if (turnToAngleSmall(goal, 0.25)) {
             delay(1000);
-            mecanumDrive(0.26, 0, 0);
-            delay(1100);
-            turnOffMotors();
-            delay(1000);
-            bool flamePresent = updateFlameSensor();
-            if (flamePresent) {
-                candleCount++;
-                digitalWrite(FAN_PIN, HIGH);
-                delay(3000);
-                digitalWrite(FAN_PIN, LOW);
-                delay(1000);
-            }
-            printeln("Num Candles: " + String(candleCount));
+            moveWithDelay(0.26, 0, 0, 1100, 1000);
+            extinguishCandle();
             testPath = CANDLE4;
         }
     }
     
     else if (testPath == CANDLE4) {
         // mission site - successfully aligned to candle4
-        mecanumDrive(-0.25, 0, 0);
-        delay(700);
-        turnOffMotors();
-        delay(1000);
-        bool flamePresent = updateFlameSensor();
-        if (flamePresent) {
-            candleCount++;
-            digitalWrite(FAN_PIN, HIGH);
-            delay(3000);
-            digitalWrite(FAN_PIN, LOW);
-            delay(1000);
-        }
-        printeln("Num Candles: " + String(candleCount));
+        moveWithDelay(-0.25, 0, 0, 700, 1000);
+        extinguishCandle();
         Enes100.mission(NUM_CANDLES, candleCount);
         if (isTopStartingPosition == true) {
             testPath = TOP3;
@@ -1054,14 +1267,9 @@ void loop() {
             // going to obstacles - moving backwards and turning to face obstacles
             if (moveLongToY(1.5, 0.25)) {
                 // turn angle
-                mecanumDrive(0, 0, -0.25);
-                delay(1300);
-                turnOffMotors();
-                delay(1000);
-                printeln("turning to face obstacles");
+                moveWithDelay(0, 0, -0.25, 1300, 1000);
+                printlnToConsole("turning to face obstacles");
                 testPath = TOP4;
-                setTurnDirection(0);
-                delay(1000);
             }
         break;
         case TOP4:
@@ -1075,7 +1283,6 @@ void loop() {
             // going to obstacles - adjusting Y coordinate
             if (moveStrafeToY(1.5, 0.35)) {
                 testPath = TOP444;
-                setTurnDirection(0);
                 delay(1000);
             }
         break;
@@ -1107,20 +1314,22 @@ void loop() {
             if (!isObstaclePauseActive) {
                 isObstaclePauseActive = true;
                 obstaclePauseStartTime = now;
-                printeln("Pausing to check for obstacles...");
+                printlnToConsole("Pausing to check for obstacles...");
             } else if (now - obstaclePauseStartTime >= OBSTACLE_PAUSE_DURATION) {
                 float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLE_COUNT, OBSTACLE_SAMPLE_DELAY);
                 isObstaclePauseActive = false;
                 if (avgFront < 0) {
-                    printeln("Front sensor readings invalid; assuming clear path");
+                    printlnToConsole("Front sensor readings invalid; assuming clear path");
+                    FORWARD_SECOND_ROW_VALUE = 1.48;
                     testPath = FORWARD_SECOND_ROW;
                     delay(1000);
                 } else if (avgFront < OBSTACLE_FRONT_THRESHOLD) {
-                    printeln("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
+                    printlnToConsole("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = CHECK_OBSTACLE_TOP2F;
                     delay(1000);
                 } else {
-                    printeln("No obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
+                    printlnToConsole("No obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
+                    FORWARD_SECOND_ROW_VALUE = 1.48;
                     testPath = FORWARD_SECOND_ROW;
                     delay(1000);
                 }
@@ -1131,8 +1340,6 @@ void loop() {
             if (moveStrafeToY(1.0, 0.35)) {
                 isObstaclePauseActive = false;
                 testPath = CHECK_OBSTACLE_TOP2FF;
-                delay(1000);
-                setTurnDirection(0);
                 delay(1000);
             }
         break;
@@ -1156,20 +1363,20 @@ void loop() {
             if (!isObstaclePauseActive) {
                 isObstaclePauseActive = true;
                 obstaclePauseStartTime = now;
-                printeln("Pausing to check for obstacles...");
+                printlnToConsole("Pausing to check for obstacles...");
             } else if (now - obstaclePauseStartTime >= OBSTACLE_PAUSE_DURATION) {
                 float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLE_COUNT, OBSTACLE_SAMPLE_DELAY);
                 isObstaclePauseActive = false;
                 if (avgFront < 0) {
-                    printeln("Front sensor readings invalid; assuming clear path");
+                    printlnToConsole("Front sensor readings invalid; assuming clear path");
                     testPath = FORWARD_SECOND_ROW;
                     delay(1000);
                 } else if (avgFront < OBSTACLE_FRONT_THRESHOLD) {
-                    printeln("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
+                    printlnToConsole("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = CHECK_OBSTACLE_TOP3F;
                     delay(1000);
                 } else {
-                    printeln("No obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
+                    printlnToConsole("No obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = FORWARD_SECOND_ROW;
                     delay(1000);
                 }
@@ -1180,7 +1387,6 @@ void loop() {
             if (moveStrafeToY(0.5, 0.41)) {
                 isObstaclePauseActive = false;
                 testPath = CHECK_OBSTACLE_TOP3FF;
-                setTurnDirection(0);
                 delay(1000);
             }
         break;
@@ -1205,7 +1411,6 @@ void loop() {
             // go half the way, then adjust angle
             if (moveStrafeToY(0.95, 0.35)) {
                 testPath = MOVE_TO_SECOND_ROW_TOP_HALF_R;
-                setTurnDirection(0);
                 delay(1000);
             }
         break;
@@ -1220,7 +1425,7 @@ void loop() {
 
         case FORWARD_SECOND_ROW:
             // go past the first row of obstacles
-            if (moveLongToX(1.51, 0.25)) {
+            if (moveLongToX(FORWARD_SECOND_ROW_VALUE, 0.25)) {
                 testPath = MOVE_TO_SECOND_ROW_TOP;
                 delay(1000);
             }
@@ -1230,7 +1435,6 @@ void loop() {
             // go to the top of the second row
             if (moveStrafeToY(1.5, 0.35)) {
                 testPath = MOVE_TO_SECOND_ROW_TOP_ROTATE;
-                setTurnDirection(0);
                 delay(1000);
             }
         break;
@@ -1257,20 +1461,20 @@ void loop() {
             if (!isObstaclePauseActive) {
                 isObstaclePauseActive = true;
                 obstaclePauseStartTime = now;
-                printeln("Pausing to check for obstacles...");
+                printlnToConsole("Pausing to check for obstacles...");
             } else if (now - obstaclePauseStartTime >= OBSTACLE_PAUSE_DURATION) {
                 float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLE_COUNT, OBSTACLE_SAMPLE_DELAY);
                 isObstaclePauseActive = false;
                 if (avgFront < 0) {
-                    printeln("Front sensor readings invalid; assuming clear path");
+                    printlnToConsole("Front sensor readings invalid; assuming clear path");
                     testPath = FORWARD_THIRD_ROW;
                     delay(1000);
                 } else if (avgFront < OBSTACLE_FRONT_THRESHOLD) {
-                    printeln("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
+                    printlnToConsole("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = SECOND_ROW_MIDDLEF;
                     delay(1000);
                 } else {
-                    printeln("No obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
+                    printlnToConsole("No obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = FORWARD_THIRD_ROW;
                     delay(1000);
                 }
@@ -1281,7 +1485,6 @@ void loop() {
             // strafing to the second row to detect the middle obstacle
             if (moveStrafeToY(1.0, 0.35)) {
                 testPath = SECOND_ROW_MIDDLEFF;
-                setTurnDirection(0);
                 delay(1000);
             }
         break;
@@ -1308,20 +1511,20 @@ void loop() {
             if (!isObstaclePauseActive) {
                 isObstaclePauseActive = true;
                 obstaclePauseStartTime = now;
-                printeln("Pausing to check for obstacles...");
+                printlnToConsole("Pausing to check for obstacles...");
             } else if (now - obstaclePauseStartTime >= OBSTACLE_PAUSE_DURATION) {
                 float avgFront = getFrontDistanceAverage(OBSTACLE_SAMPLE_COUNT, OBSTACLE_SAMPLE_DELAY);
                 isObstaclePauseActive = false;
                 if (avgFront < 0) {
-                    printeln("Front sensor readings invalid; assuming clear path");
+                    printlnToConsole("Front sensor readings invalid; assuming clear path");
                     testPath = FORWARD_THIRD_ROW;
                     delay(1000);
                 } else if (avgFront < OBSTACLE_FRONT_THRESHOLD) {
-                    printeln("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
+                    printlnToConsole("Obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = SECOND_ROW_BOTTOMF;
                     delay(1000);
                 } else {
-                    printeln("No obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
+                    printlnToConsole("No obstacle detected: avg front distance " + String(avgFront, 2) + " cm");
                     testPath = FORWARD_THIRD_ROW;
                     delay(1000);
                 }
@@ -1332,7 +1535,6 @@ void loop() {
             // strafing to the third row
             if (moveStrafeToY(0.5, 0.35)) {
                 testPath = SECOND_ROW_BOTTOMFF;
-                setTurnDirection(0);
                 delay(1000);
             }
         break;
@@ -1357,7 +1559,6 @@ void loop() {
             // strafing to the limbo area
             if (moveStrafeToY(1.54, 0.35)) {
                 testPath = GO_TO_LIMBO_ROTATE;
-                setTurnDirection(0);
                 delay(1000);
             }
         break;
@@ -1373,25 +1574,20 @@ void loop() {
         case GO_UNDER_LIMBO:
             // going underneath limbo
             if (moveLongToX(3.75, 0.25)) {
-                printeln("DONE!");
+                printlnToConsole("DONE!");
             }
         break;
 
         case BOTTOM1:
             // going to mission site - turning around to face it
-            mecanumDrive(0, 0, 0.27);
-            delay(2900);
-            turnOffMotors();
-            delay(1000);
-            printeln("turning at smaller speed");
-            setTurnDirection(1.5708);
-            delay(1000);
+            moveWithDelay(0, 0, 0.27, 2900, 1000);
+            printlnToConsole("turning at smaller speed");
             testPath = BOTTOM2;
         break;
         case BOTTOM2:
             // going to mission site - fine tuning theta
             if (turnToAngleSmall(1.5708, 0.25, 220)) {
-                printeln("moving to mission site");
+                printlnToConsole("moving to mission site");
                 testPath = BOTTOM3;
                 delay(1000);
             }
@@ -1407,8 +1603,6 @@ void loop() {
             // going to mission site - strafing to align limit switches
             if (moveStrafeToX(0.32, 0.3)) {
                 delay(1000);
-                setTurnDirection(1.5708);
-                delay(1000);
                 testPath = BOTTOM5;
             }
         break;
@@ -1423,14 +1617,9 @@ void loop() {
             // going to obstacles - moving backwards and turning to face obstacles
             if (moveLongToY(1.0, 0.25)) {
                 // turn angle
-                mecanumDrive(0, 0, 0.25);
-                delay(1300);
-                turnOffMotors();
-                delay(1000);
-                printeln("turning to face obstacles");
+                moveWithDelay(0, 0, 0.25, 1300, 1000);
+                printlnToConsole("turning to face obstacles");
                 testPath = BOTTOM7;
-                setTurnDirection(0);
-                delay(1000);
             }
         break;
         case BOTTOM7:
@@ -1446,10 +1635,6 @@ void loop() {
                 testPath = TOP44;
                 delay(1000);
             }
-        break;
-        case BOTTOM9:
-        break;
-        case BOTTOM10:
         break;
     }
 }
